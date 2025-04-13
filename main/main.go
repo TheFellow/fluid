@@ -5,8 +5,8 @@ import (
 	"image/color"
 	"log"
 	"math/rand/v2"
-	"time"
 
+	"github.com/TheFellow/fluid/pkg/fluid"
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
@@ -21,10 +21,15 @@ const (
 type Game struct {
 	counter int
 	bgColor color.RGBA
+
+	fluid *fluid.Fluid
 }
 
 func NewGame() *Game {
-	return &Game{}
+	f := fluid.New(1000, fluidWidth, fluidHeight, 1000)
+	return &Game{
+		fluid: f,
+	}
 }
 
 func (g *Game) Update() error {
@@ -37,14 +42,16 @@ func (g *Game) Update() error {
 			A: 0xff,
 		}
 	}
+
+	dt := float32(1.0 / ebiten.ActualTPS())
+	g.fluid.Simulate(dt, -9.81, 10)
 	return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
 	screen.Fill(g.bgColor)
 
-	ebitenutil.DebugPrint(screen, fmt.Sprintf("FluidSim - %s\nFPS: %0.2f",
-		time.Now().Format("2006-01-02 15:04:05"), ebiten.ActualFPS()))
+	ebitenutil.DebugPrint(screen, fmt.Sprintf("FluidSim - FPS: %0.2f", ebiten.ActualFPS()))
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (w, hHeight int) {

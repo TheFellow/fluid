@@ -30,14 +30,14 @@ func New(density float32, width, height int, h float32) *Fluid {
 		numX:     width + 2,  // LR border cells
 		numY:     height + 2, // TB border cells
 		numCells: numCells,
-		u:        make([]float32, 0, numCells),
-		v:        make([]float32, 0, numCells),
-		newU:     make([]float32, 0, numCells),
-		newV:     make([]float32, 0, numCells),
-		p:        make([]float32, 0, numCells),
-		s:        make([]float32, 0, numCells),
-		m:        make([]float32, 0, numCells),
-		newM:     make([]float32, 0, numCells),
+		u:        make([]float32, numCells),
+		v:        make([]float32, numCells),
+		newU:     make([]float32, numCells),
+		newV:     make([]float32, numCells),
+		p:        make([]float32, numCells),
+		s:        make([]float32, numCells),
+		m:        make([]float32, numCells),
+		newM:     make([]float32, numCells),
 	}
 }
 
