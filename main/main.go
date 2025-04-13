@@ -44,7 +44,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	screen.Fill(g.bgColor)
 
 	ebitenutil.DebugPrint(screen, fmt.Sprintf("FluidSim - %s\nFPS: %0.2f",
-		time.Now().Format("2006-01-02 15:04:05"), ebiten.ActualTPS()))
+		time.Now().Format("2006-01-02 15:04:05"), ebiten.ActualFPS()))
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (w, hHeight int) {
