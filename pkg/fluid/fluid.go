@@ -11,6 +11,7 @@ var (
 type Fluid struct {
 	density float32
 	h       float32
+	Gravity float32
 
 	NumX, NumY int
 	numCells   int
@@ -25,8 +26,6 @@ type Fluid struct {
 
 func New(density float32, width, height int, h float32) *Fluid {
 	numCells := (width + 2) * (height + 2)
-	m := make([]float32, numCells)
-	fill(m, 1.0)
 	return &Fluid{
 		density: density,
 		h:       h,
@@ -40,7 +39,7 @@ func New(density float32, width, height int, h float32) *Fluid {
 		newV:     make([]float32, numCells),
 		p:        make([]float32, numCells),
 		s:        make([]float32, numCells),
-		m:        m,
+		m:        make([]float32, numCells),
 		newM:     make([]float32, numCells),
 	}
 }
@@ -64,8 +63,11 @@ func (f *Fluid) handleGravity(dt, gravity float32) {
 	n := f.NumY
 	for i := range f.NumX {
 		for j := range f.NumY {
+			if i*n+j-1 < 0 {
+				continue
+			}
 			if f.s[i*n+j] != 0.0 && f.s[i*n+j-1] != 0.0 {
-				f.v[i*n+j] += gravity * dt
+				f.v[i*n+j] += f.Gravity * dt
 			}
 		}
 	}
@@ -77,8 +79,8 @@ func (f *Fluid) makeIncompressible(numIters uint, dt float32) {
 
 	for range numIters {
 
-		for i := range f.NumX {
-			for j := range f.NumY {
+		for i := 1; i < f.NumX-1; i++ {
+			for j := 1; j < f.NumY-1; j++ {
 
 				// If the cell is solid, nothing to do...
 				if f.s[i*n+j] == 0 {
@@ -129,11 +131,11 @@ func (f *Fluid) advectVelocity(dt float32) {
 	h := f.h
 	h2 := h / 2
 
-	for i := range f.NumX {
-		for j := range f.NumY {
+	for i := 1; i < f.NumX; i++ {
+		for j := 1; j < f.NumY; j++ {
 
 			// u component
-			if f.s[i*n+j] != 0.0 && f.s[(i-1)*n+j] != 0.0 {
+			if f.s[i*n+j] != 0.0 && f.s[(i-1)*n+j] != 0.0 && j < f.NumY-1 {
 				x := float32(i) * h
 				y := float32(j)*h + h2
 				u := f.u[i*n+j]
@@ -146,7 +148,7 @@ func (f *Fluid) advectVelocity(dt float32) {
 			}
 
 			// v component
-			if f.s[i*n+j] != 0.0 && f.s[i*n+j-1] != 0.0 {
+			if f.s[i*n+j] != 0.0 && f.s[i*n+j-1] != 0.0 && i < f.NumX-1 {
 				x := float32(i)*h + h2
 				y := float32(j) * h
 				u := f.avgU(i, j)
@@ -238,8 +240,8 @@ func (f *Fluid) advectSmoke(dt float32) {
 	h := f.h
 	h2 := 0.5 * h
 
-	for i := range f.NumX {
-		for j := range f.NumY {
+	for i := 1; i < f.NumX-1; i++ {
+		for j := 1; j < f.NumY-1; j++ {
 
 			if f.s[i*n+j] != 0.0 {
 				var u = (f.u[i*n+j] + f.u[(i+1)*n+j]) * 0.5
