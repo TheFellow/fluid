@@ -239,6 +239,10 @@ func (f *Fluid) sampleField(x, y float32, fld field) float32 {
 }
 
 func (f *Fluid) advectSmoke(dt float32) {
+	for i := range f.numCells {
+		f.newM[i] = f.m[i]
+	}
+
 	n := f.NumY
 	h := f.h
 	h2 := 0.5 * h

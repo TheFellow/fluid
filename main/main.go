@@ -64,7 +64,7 @@ func (g *Game) Update() error {
 	}
 
 	if g.jet {
-		x, y := 4.0, 00.0
+		x, y := 4.0, 0.0
 		size := 30
 		for j := fluidHeight/2 - size; j < fluidHeight/2+size; j++ {
 			g.fluid.SetVelocity(1, j, float32(x), float32(y))
@@ -104,7 +104,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 		for i := range smoke.NumX {
 			for j := range smoke.NumY {
-				s, err := smoke.Value(i, j)
+				s, err := smoke.Value(i, smoke.NumY-j-1)
 				if err != nil {
 					log.Panicf("cannot get smoke: %v", err)
 				}

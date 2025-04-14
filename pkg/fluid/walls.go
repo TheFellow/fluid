@@ -42,7 +42,7 @@ func (f *Fluid) AddSmoke(i, j int, smoke float32) {
 
 func (f *Fluid) SetGravity(on bool) {
 	if on {
-		f.Gravity = 9.81
+		f.Gravity = -9.81
 	} else {
 		f.Gravity = 0.0
 	}
