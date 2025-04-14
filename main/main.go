@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image"
 	"log"
-	"math"
 
 	"github.com/TheFellow/fluid/pkg/fluid"
 	"github.com/hajimehoshi/ebiten/v2"
@@ -28,11 +27,11 @@ type Game struct {
 }
 
 func NewGame() *Game {
-	f := fluid.New(1000, fluidWidth, fluidHeight, 1.0/50.0)
+	f := fluid.New(1000, fluidWidth, fluidHeight, 1.0/100.0)
 	// Set no walls except floor
 	for i := range fluidWidth + 2 {
 		for j := range fluidHeight + 2 {
-			if j == 0 || j == fluidHeight+2-1 || i == 0 || i == fluidWidth+2-1 {
+			if j == 0 || j == fluidHeight+2-1 /* || i == 0 || i == fluidWidth+2-1 */ {
 				f.SetSolid(i, j, true)
 			} else {
 				f.SetSolid(i, j, false)
@@ -80,32 +79,14 @@ var drawOpts = &ebiten.DrawImageOptions{Filter: ebiten.FilterLinear}
 func (g *Game) Draw(screen *ebiten.Image) {
 
 	if !g.showSmoke {
-		// min/max pressures
-		minPressure := float32(math.MaxFloat32)
-		maxPressure := float32(0)
 		pressures := g.fluid.Pressure()
-		for i := range fluidWidth {
-			for j := range fluidHeight {
-				p, err := pressures.Value(i, j)
-				if err != nil {
-					log.Panicf("cannot get pressure: %v", err)
-				}
-				if p < minPressure {
-					minPressure = p
-				}
-				if p > maxPressure {
-					maxPressure = p
-				}
-			}
-		}
-
 		for i := range pressures.NumX {
 			for j := range pressures.NumY {
 				p, err := pressures.Value(i, pressures.NumY-j-1)
 				if err != nil {
 					log.Panicf("cannot get pressure: %v", err)
 				}
-				color := getSciValue(p, minPressure, maxPressure)
+				color := getSciValue(p, pressures.MinValue, pressures.MaxValue)
 				idx := g.fluidToImageIndex(i, j)
 				g.image.Pix[idx+0] = color.R
 				g.image.Pix[idx+1] = color.G
@@ -116,8 +97,6 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 
 	if g.showSmoke {
-		minSmoke := float32(0)
-		maxSmoke := float32(1)
 		smoke := g.fluid.Smoke()
 
 		for i := range smoke.NumX {
@@ -126,22 +105,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 				if err != nil {
 					log.Panicf("cannot get smoke: %v", err)
 				}
-				if s < minSmoke {
-					minSmoke = s
-				}
-				if s > maxSmoke {
-					maxSmoke = s
-				}
-			}
-		}
-
-		for i := range smoke.NumX {
-			for j := range smoke.NumY {
-				s, err := smoke.Value(i, j)
-				if err != nil {
-					log.Panicf("cannot get smoke: %v", err)
-				}
-				color := getSciValue(s, minSmoke, maxSmoke)
+				color := getSciValue(s, smoke.MinValue, smoke.MaxValue)
 				idx := g.fluidToImageIndex(i, j)
 				g.image.Pix[idx+0] = color.R
 				g.image.Pix[idx+1] = color.G

@@ -5,8 +5,9 @@ import (
 )
 
 type ScalarField struct {
-	NumX, NumY int
-	values     []float32
+	NumX, NumY         int
+	values             []float32
+	MinValue, MaxValue float32
 }
 
 func (s ScalarField) Value(i, j int) (float32, error) {
