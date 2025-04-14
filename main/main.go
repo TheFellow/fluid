@@ -12,10 +12,12 @@ import (
 )
 
 const (
-	screenWidth  = 1024
-	screenHeight = 768
-	fluidWidth   = 300
-	fluidHeight  = 220
+	factor = 4
+
+	screenWidth  = 1200
+	screenHeight = 1000
+	fluidWidth   = screenWidth / factor
+	fluidHeight  = screenHeight / factor
 )
 
 type Game struct {

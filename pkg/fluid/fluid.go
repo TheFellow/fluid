@@ -77,6 +77,9 @@ func (f *Fluid) handleGravity(dt float32) {
 }
 
 func (f *Fluid) makeIncompressible(numIters uint, dt float32) {
+	f.copyBorder(f.newU, f.u)
+	f.copyBorder(f.newV, f.v)
+
 	n := f.NumY
 	cp := f.density * float32(f.h) / dt
 
@@ -129,6 +132,8 @@ func (f *Fluid) handleBorders() {
 }
 
 func (f *Fluid) advectVelocity(dt float32) {
+	f.copyBorder(f.newU, f.u)
+	f.copyBorder(f.newV, f.v)
 
 	n := f.NumY
 	h := f.h
@@ -165,12 +170,8 @@ func (f *Fluid) advectVelocity(dt float32) {
 		}
 	}
 
-	for i := range f.numCells {
-		f.u[i] = f.newU[i]
-	}
-	for j := range f.numCells {
-		f.v[j] = f.newV[j]
-	}
+	copy(f.u, f.newU)
+	copy(f.v, f.newV)
 }
 
 func (f *Fluid) avgU(i, j int) float32 {
@@ -239,9 +240,8 @@ func (f *Fluid) sampleField(x, y float32, fld field) float32 {
 }
 
 func (f *Fluid) advectSmoke(dt float32) {
-	for i := range f.numCells {
-		f.newM[i] = f.m[i]
-	}
+	f.copyBorder(f.newM, f.m)
+	f.copyBorder(f.newM, f.m)
 
 	n := f.NumY
 	h := f.h
@@ -261,7 +261,17 @@ func (f *Fluid) advectSmoke(dt float32) {
 		}
 	}
 
-	for i := range f.numCells {
-		f.m[i] = f.newM[i]
+	copy(f.m, f.newM)
+}
+
+func (f *Fluid) copyBorder(dst, src []float32) {
+	n := f.NumY
+	for i := 0; i < f.NumX; i++ {
+		dst[i*n+0] = src[i*n+0]
+		dst[i*n+f.NumY-1] = src[i*n+f.NumY-1]
+	}
+	for j := 0; j < f.NumY; j++ {
+		dst[0+j] = src[0+j]
+		dst[f.NumX+j] = src[f.NumX+j]
 	}
 }
