@@ -1,14 +1,14 @@
 package fluid
 
 func (f *Fluid) Smoke() ScalarField {
-	mCopy := make([]float32, f.numCells)
-	for i := range f.numCells {
-		mCopy[i] = f.m[i]
-	}
+	// mCopy := make([]float32, f.numCells)
+	// for i := range f.numCells {
+	// 	mCopy[i] = f.m[i]
+	// }
 	s := ScalarField{
 		NumX:   f.NumX,
 		NumY:   f.NumY,
-		values: mCopy,
+		values: f.m,
 	}
 	return s
 }

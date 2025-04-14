@@ -187,7 +187,7 @@ type field int
 const (
 	fieldU field = iota
 	fieldV
-	fieldS
+	fieldM
 )
 
 func (f *Fluid) sampleField(x, y float32, fld field) float32 {
@@ -209,7 +209,7 @@ func (f *Fluid) sampleField(x, y float32, fld field) float32 {
 	case fieldV:
 		fieldToSample = f.v
 		dx = h2
-	case fieldS:
+	case fieldM:
 		fieldToSample = f.m
 		dx, dy = h2, h2
 	}
@@ -235,8 +235,8 @@ func (f *Fluid) sampleField(x, y float32, fld field) float32 {
 
 func (f *Fluid) advectSmoke(dt float32) {
 	n := f.NumY
-	h := float32(f.h)
-	h2 := 0.5 * float32(h)
+	h := f.h
+	h2 := 0.5 * h
 
 	for i := range f.NumX {
 		for j := range f.NumY {
@@ -247,7 +247,7 @@ func (f *Fluid) advectSmoke(dt float32) {
 				var x = float32(i)*h + h2 - dt*u
 				var y = float32(j)*h + h2 - dt*v
 
-				f.newM[i*n+j] = f.sampleField(x, y, fieldS)
+				f.newM[i*n+j] = f.sampleField(x, y, fieldM)
 			}
 		}
 	}
