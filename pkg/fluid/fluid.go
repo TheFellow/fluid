@@ -26,6 +26,8 @@ type Fluid struct {
 
 func New(density float32, width, height int, h float32) *Fluid {
 	numCells := (width + 2) * (height + 2)
+	m := make([]float32, numCells)
+	fill(m, 1.0)
 	return &Fluid{
 		density: density,
 		h:       h,
@@ -39,16 +41,20 @@ func New(density float32, width, height int, h float32) *Fluid {
 		newV:     make([]float32, numCells),
 		p:        make([]float32, numCells),
 		s:        make([]float32, numCells),
-		m:        make([]float32, numCells),
+		m:        m,
 		newM:     make([]float32, numCells),
+	}
+}
+
+func fill[T any](slice []T, val T) {
+	for i := range slice {
+		slice[i] = val
 	}
 }
 
 func (f *Fluid) Simulate(dt, gravity float32, numIters uint) {
 	f.handleGravity(dt, gravity)
-	for i := range f.p {
-		f.p[i] = 0
-	}
+	fill(f.p, 0)
 	f.makeIncompressible(numIters, dt)
 	f.handleBorders()
 	f.advectVelocity(dt)
@@ -57,7 +63,7 @@ func (f *Fluid) Simulate(dt, gravity float32, numIters uint) {
 
 func (f *Fluid) handleGravity(dt, gravity float32) {
 	n := f.numY
-	for i := 1; i < f.numX; i++ {
+	for i := 1; i < f.numX-1; i++ {
 		for j := 1; j < f.numY-1; j++ {
 			if f.s[i*n+j] != 0.0 && f.s[i*n+j-1] != 0.0 {
 				f.v[i*n+j] += gravity * dt
@@ -74,7 +80,7 @@ func (f *Fluid) makeIncompressible(numIters uint, dt float32) {
 
 		for i := 1; i < f.numX-1; i++ {
 			for j := 1; j < f.numY-1; j++ {
-				if j == f.numY-2 {
+				if i == 1 && j == 1 || i == 1 && j == f.numY-2 {
 					xxx := fmt.Sprintf("b")
 					_ = xxx
 				}
@@ -124,22 +130,22 @@ func (f *Fluid) handleBorders() {
 
 func (f *Fluid) advectVelocity(dt float32) {
 	// TODO: Remove f clearing of the array?
-	for i := range f.numCells {
-		f.newU[i] = f.u[i]
-	}
-	for j := range f.numCells {
-		f.newV[j] = f.v[j]
-	}
+	// for i := range f.numCells {
+	// 	f.newU[i] = f.u[i]
+	// }
+	// for j := range f.numCells {
+	// 	f.newV[j] = f.v[j]
+	// }
 
 	n := f.numY
 	h := f.h
 	h2 := h / 2
 
-	for i := 1; i < f.numX; i++ {
-		for j := 1; j < f.numY; j++ {
+	for i := 0; i < f.numX; i++ {
+		for j := 0; j < f.numY; j++ {
 
 			// u component
-			if f.s[i*n+j] != 0.0 && f.s[(i-1)*n+j] != 0.0 && j < f.numY-1 {
+			if f.s[i*n+j] != 0.0 && f.s[(i-1)*n+j] != 0.0 {
 				x := float32(i) * h
 				y := float32(j)*h + h2
 				u := f.u[i*n+j]
@@ -152,7 +158,7 @@ func (f *Fluid) advectVelocity(dt float32) {
 			}
 
 			// v component
-			if f.s[i*n+j] != 0.0 && f.s[i*n+j-1] != 0.0 && i < f.numX-1 {
+			if f.s[i*n+j] != 0.0 && f.s[i*n+j-1] != 0.0 {
 				x := float32(i)*h + h2
 				y := float32(j) * h
 				u := f.avgU(i, j)

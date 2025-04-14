@@ -13,7 +13,7 @@ import (
 const (
 	screenWidth  = 800
 	screenHeight = 480
-	fluidWidth   = 400
+	fluidWidth   = 401
 	fluidHeight  = 240
 )
 
@@ -22,7 +22,7 @@ type Game struct {
 }
 
 func NewGame() *Game {
-	f := fluid.New(1000, fluidWidth, fluidHeight, float32(screenHeight)/200.0)
+	f := fluid.New(1000, fluidWidth, fluidHeight, 1.0/100.0)
 	// Set no walls except floor
 	for i := range fluidWidth {
 		for j := range fluidHeight {
@@ -39,7 +39,7 @@ func NewGame() *Game {
 }
 
 func (g *Game) Update() error {
-	dt := float32(1.0 / float32(ebiten.TPS()))
+	dt := float32(1.0 / float32(120))
 	g.fluid.Simulate(dt, -9.81, 10)
 	return nil
 }
@@ -62,6 +62,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			}
 		}
 	}
+
 	for i := range fluidWidth {
 		for j := range fluidHeight {
 			_, _ = i, j
