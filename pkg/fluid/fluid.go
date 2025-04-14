@@ -1,7 +1,6 @@
 package fluid
 
 import (
-	"fmt"
 	"math"
 )
 
@@ -13,7 +12,7 @@ type Fluid struct {
 	density float32
 	h       float32
 
-	numX, numY int
+	NumX, NumY int
 	numCells   int
 	u, v       []float32 // velocities
 	newU, newV []float32
@@ -32,8 +31,8 @@ func New(density float32, width, height int, h float32) *Fluid {
 		density: density,
 		h:       h,
 
-		numX:     width + 2,  // LR border cells
-		numY:     height + 2, // TB border cells
+		NumX:     width + 2,  // LR border cells
+		NumY:     height + 2, // TB border cells
 		numCells: numCells,
 		u:        make([]float32, numCells),
 		v:        make([]float32, numCells),
@@ -62,9 +61,9 @@ func (f *Fluid) Simulate(dt, gravity float32, numIters uint) {
 }
 
 func (f *Fluid) handleGravity(dt, gravity float32) {
-	n := f.numY
-	for i := 1; i < f.numX-1; i++ {
-		for j := 1; j < f.numY-1; j++ {
+	n := f.NumY
+	for i := range f.NumX {
+		for j := range f.NumY {
 			if f.s[i*n+j] != 0.0 && f.s[i*n+j-1] != 0.0 {
 				f.v[i*n+j] += gravity * dt
 			}
@@ -73,17 +72,13 @@ func (f *Fluid) handleGravity(dt, gravity float32) {
 }
 
 func (f *Fluid) makeIncompressible(numIters uint, dt float32) {
-	n := f.numY
+	n := f.NumY
 	cp := f.density * float32(f.h) / dt
 
 	for range numIters {
 
-		for i := 1; i < f.numX-1; i++ {
-			for j := 1; j < f.numY-1; j++ {
-				if i == 1 && j == 1 || i == 1 && j == f.numY-2 {
-					xxx := fmt.Sprintf("b")
-					_ = xxx
-				}
+		for i := range f.NumX {
+			for j := range f.NumY {
 
 				// If the cell is solid, nothing to do...
 				if f.s[i*n+j] == 0 {
@@ -116,33 +111,26 @@ func (f *Fluid) makeIncompressible(numIters uint, dt float32) {
 }
 
 func (f *Fluid) handleBorders() {
-	n := f.numY
-	for i := range f.numX {
+	n := f.NumY
+	for i := range f.NumX {
 		f.u[i*n+0] = f.u[i*n+1]               // top border
-		f.u[i*n+f.numY-1] = f.u[i*n+f.numY-2] // bottom border
+		f.u[i*n+f.NumY-1] = f.u[i*n+f.NumY-2] // bottom border
 	}
 
-	for j := range f.numY {
+	for j := range f.NumY {
 		f.v[0*n+j] = f.v[1*n+j]                   // left border
-		f.v[(f.numX-1)*n+j] = f.v[(f.numX-2)*n+j] // right border
+		f.v[(f.NumX-1)*n+j] = f.v[(f.NumX-2)*n+j] // right border
 	}
 }
 
 func (f *Fluid) advectVelocity(dt float32) {
-	// TODO: Remove f clearing of the array?
-	// for i := range f.numCells {
-	// 	f.newU[i] = f.u[i]
-	// }
-	// for j := range f.numCells {
-	// 	f.newV[j] = f.v[j]
-	// }
 
-	n := f.numY
+	n := f.NumY
 	h := f.h
 	h2 := h / 2
 
-	for i := 0; i < f.numX; i++ {
-		for j := 0; j < f.numY; j++ {
+	for i := range f.NumX {
+		for j := range f.NumY {
 
 			// u component
 			if f.s[i*n+j] != 0.0 && f.s[(i-1)*n+j] != 0.0 {
@@ -181,14 +169,14 @@ func (f *Fluid) advectVelocity(dt float32) {
 }
 
 func (f *Fluid) avgU(i, j int) float32 {
-	n := f.numY
+	n := f.NumY
 	u := (f.u[i*n+j-1] + f.u[i*n+j] +
 		f.u[(i+1)*n+j-1] + f.u[(i+1)*n+j]) * 0.25
 	return u
 }
 
 func (f *Fluid) avgV(i, j int) float32 {
-	n := f.numY
+	n := f.NumY
 	v := (f.v[(i-1)*n+j] + f.v[i*n+j] +
 		f.v[(i-1)*n+j+1] + f.v[i*n+j+1]) * 0.25
 	return v
@@ -203,13 +191,13 @@ const (
 )
 
 func (f *Fluid) sampleField(x, y float32, fld field) float32 {
-	n := f.numY
+	n := f.NumY
 	h := f.h
 	h1 := float32(1.0 / h)
 	h2 := float32(0.5 * h)
 
-	x = max(min(x, float32(f.numX)*h), h)
-	y = max(min(y, float32(f.numY)*h), h)
+	x = max(min(x, float32(f.NumX)*h), h)
+	y = max(min(y, float32(f.NumY)*h), h)
 
 	dx, dy := float32(0.0), float32(0.0)
 
@@ -226,13 +214,13 @@ func (f *Fluid) sampleField(x, y float32, fld field) float32 {
 		dx, dy = h2, h2
 	}
 
-	x0 := min(int(math.Floor(float64((x-dx)*h1))), f.numX-1)
+	x0 := min(int(math.Floor(float64((x-dx)*h1))), f.NumX-1)
 	tx := ((x - dx) - float32(x0)*h) * h1
-	x1 := min(x0+1, f.numX-1)
+	x1 := min(x0+1, f.NumX-1)
 
-	y0 := min(int(math.Floor(float64((y-dy)*h1))), f.numY-1)
+	y0 := min(int(math.Floor(float64((y-dy)*h1))), f.NumY-1)
 	ty := ((y - dy) - float32(y0)*h) * h1
-	y1 := min(y0+1, f.numY-1)
+	y1 := min(y0+1, f.NumY-1)
 
 	sx := 1.0 - tx
 	sy := 1.0 - ty
@@ -246,16 +234,12 @@ func (f *Fluid) sampleField(x, y float32, fld field) float32 {
 }
 
 func (f *Fluid) advectSmoke(dt float32) {
-	for i := range f.numCells {
-		f.newM[i] = f.m[i]
-	}
-
-	n := f.numY
+	n := f.NumY
 	h := float32(f.h)
 	h2 := 0.5 * float32(h)
 
-	for i := 1; i < f.numX-1; i++ {
-		for j := 1; j < f.numY-1; j++ {
+	for i := range f.NumX {
+		for j := range f.NumY {
 
 			if f.s[i*n+j] != 0.0 {
 				var u = (f.u[i*n+j] + f.u[(i+1)*n+j]) * 0.5

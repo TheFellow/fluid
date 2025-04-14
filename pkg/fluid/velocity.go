@@ -10,8 +10,8 @@ func (f *Fluid) Velocity() VectorField {
 	// 	vCopy[i] = f.v[i]
 	// }
 	return VectorField{
-		numX:    f.numX,
-		numY:    f.numY,
+		NumX:    f.NumX,
+		NumY:    f.NumY,
 		valuesU: f.u,
 		valuesV: f.v,
 	}

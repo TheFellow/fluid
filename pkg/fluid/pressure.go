@@ -6,8 +6,8 @@ func (f *Fluid) Pressure() ScalarField {
 	// 	pCopy[i] = f.p[i]
 	// }
 	s := ScalarField{
-		numX:   f.numX,
-		numY:   f.numY,
+		NumX:   f.NumX,
+		NumY:   f.NumY,
 		values: f.p,
 	}
 	return s

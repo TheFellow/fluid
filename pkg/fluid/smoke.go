@@ -6,8 +6,8 @@ func (f *Fluid) Smoke() ScalarField {
 		mCopy[i] = f.m[i]
 	}
 	s := ScalarField{
-		numX:   f.numX,
-		numY:   f.numY,
+		NumX:   f.NumX,
+		NumY:   f.NumY,
 		values: mCopy,
 	}
 	return s

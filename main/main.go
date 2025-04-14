@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	screenWidth  = 800
-	screenHeight = 480
+	screenWidth  = 1024
+	screenHeight = 768
 	fluidWidth   = 400
-	fluidHeight  = 240
+	fluidHeight  = 280
 )
 
 type Game struct {
@@ -47,6 +47,8 @@ func (g *Game) Update() error {
 	return nil
 }
 
+var drawOpts = &ebiten.DrawImageOptions{Filter: ebiten.FilterLinear}
+
 func (g *Game) Draw(screen *ebiten.Image) {
 	// min/max pressures
 	minPressure := float32(math.MaxFloat32)
@@ -67,13 +69,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 	}
 
-	if len(g.image.Pix) != 4*(fluidWidth+2)*(fluidHeight+2) {
-		log.Panicf("unexpected image dimension: want %d * %d = %d, got %d",
-			fluidWidth, fluidHeight, 4*(fluidWidth+2)*(fluidHeight+2), len(g.image.Pix))
-	}
-
-	for i := range fluidWidth + 2 {
-		for j := range fluidHeight + 2 {
+	for i := range pressures.NumX {
+		for j := range pressures.NumY {
 			p, err := pressures.Value(i, fluidHeight+2-j-1)
 			if err != nil {
 				log.Panicf("cannot get pressure: %v", err)
@@ -86,22 +83,23 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 	}
 
-	v := g.fluid.Velocity()
-	x, y, err := v.Value(fluidWidth/2, fluidHeight/2)
-	if err != nil {
-		log.Panicf("cannot get velocity: %v", err)
-	}
+	// v := g.fluid.Velocity()
+	// x, y, err := v.Value(fluidWidth/2, fluidHeight/2)
+	// if err != nil {
+	// 	log.Panicf("cannot get velocity: %v", err)
+	// }
 
 	// render
-	screen.WritePixels(g.image.Pix)
+	eImage := ebiten.NewImageFromImage(g.image)
+	//screen.WritePixels(g.image.Pix)
+	screen.DrawImage(eImage, drawOpts)
 	ebitenutil.DebugPrint(screen,
-		fmt.Sprintf("FluidSim - FPS: %0.2f\nPressures: [%0.2f, %0.2f]\nVelocity: (%0.2f, %0.2f)",
-			ebiten.ActualFPS(), minPressure, maxPressure, x, y),
+		fmt.Sprintf("FluidSim - FPS: %0.2f", ebiten.ActualFPS()),
 	)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (w, hHeight int) {
-	return fluidWidth + 2, fluidHeight + 2
+	return g.fluid.NumX, g.fluid.NumY
 }
 
 func main() {
