@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"log"
 	"math"
 
@@ -13,12 +14,13 @@ import (
 const (
 	screenWidth  = 800
 	screenHeight = 480
-	fluidWidth   = 401
+	fluidWidth   = 400
 	fluidHeight  = 240
 )
 
 type Game struct {
 	fluid *fluid.Fluid
+	image *image.RGBA
 }
 
 func NewGame() *Game {
@@ -35,6 +37,7 @@ func NewGame() *Game {
 	}
 	return &Game{
 		fluid: f,
+		image: image.NewRGBA(image.Rect(0, 0, fluidWidth+2, fluidHeight+2)),
 	}
 }
 
@@ -45,6 +48,7 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+	// min/max pressures
 	minPressure := float32(math.MaxFloat32)
 	maxPressure := float32(0)
 	pressures := g.fluid.Pressure()
@@ -63,9 +67,22 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 	}
 
-	for i := range fluidWidth {
-		for j := range fluidHeight {
-			_, _ = i, j
+	if len(g.image.Pix) != 4*(fluidWidth+2)*(fluidHeight+2) {
+		log.Panicf("unexpected image dimension: want %d * %d = %d, got %d",
+			fluidWidth, fluidHeight, 4*(fluidWidth+2)*(fluidHeight+2), len(g.image.Pix))
+	}
+
+	for i := range fluidWidth + 2 {
+		for j := range fluidHeight + 2 {
+			p, err := pressures.Value(i, fluidHeight+2-j-1)
+			if err != nil {
+				log.Panicf("cannot get pressure: %v", err)
+			}
+			color := getSciValue(p, minPressure, maxPressure)
+			g.image.Pix[4*i+j*g.image.Stride+0] = color.R
+			g.image.Pix[4*i+j*g.image.Stride+1] = color.G
+			g.image.Pix[4*i+j*g.image.Stride+2] = color.B
+			g.image.Pix[4*i+j*g.image.Stride+3] = color.A
 		}
 	}
 
@@ -75,6 +92,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		log.Panicf("cannot get velocity: %v", err)
 	}
 
+	// render
+	screen.WritePixels(g.image.Pix)
 	ebitenutil.DebugPrint(screen,
 		fmt.Sprintf("FluidSim - FPS: %0.2f\nPressures: [%0.2f, %0.2f]\nVelocity: (%0.2f, %0.2f)",
 			ebiten.ActualFPS(), minPressure, maxPressure, x, y),
@@ -82,7 +101,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (w, hHeight int) {
-	return fluidWidth, fluidHeight
+	return fluidWidth + 2, fluidHeight + 2
 }
 
 func main() {
