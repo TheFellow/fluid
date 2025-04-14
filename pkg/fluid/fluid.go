@@ -1,6 +1,9 @@
 package fluid
 
-import "math"
+import (
+	"fmt"
+	"math"
+)
 
 var (
 	Relaxation float32 = 1.9
@@ -56,71 +59,75 @@ func (f *Fluid) handleGravity(dt, gravity float32) {
 	n := f.numY
 	for i := 1; i < f.numX; i++ {
 		for j := 1; j < f.numY-1; j++ {
-			cell := i*n + j
-			if f.s[cell] != 0.0 && f.s[cell-1] != 0.0 {
-				f.v[cell] += gravity * dt
+			if f.s[i*n+j] != 0.0 && f.s[i*n+j-1] != 0.0 {
+				f.v[i*n+j] += gravity * dt
 			}
 		}
 	}
 }
 
 func (f *Fluid) makeIncompressible(numIters uint, dt float32) {
-	numY := f.numY
+	n := f.numY
 	cp := f.density * float32(f.h) / dt
 
 	for range numIters {
+
 		for i := 1; i < f.numX-1; i++ {
 			for j := 1; j < f.numY-1; j++ {
+				if j == f.numY-2 {
+					xxx := fmt.Sprintf("b")
+					_ = xxx
+				}
+
 				// If the cell is solid, nothing to do...
-				if f.s[i*numY+j] == 0 {
+				if f.s[i*n+j] == 0 {
 					continue
 				}
 
-				sx0 := f.s[(i-1)*numY+j]
-				sx1 := f.s[(i+1)*numY+j]
-				sy0 := f.s[i*numY+j-1]
-				sy1 := f.s[i*numY+j+1]
+				sx0 := f.s[(i-1)*n+j]
+				sx1 := f.s[(i+1)*n+j]
+				sy0 := f.s[i*n+j-1]
+				sy1 := f.s[i*n+j+1]
 				s := sx0 + sx1 + sy0 + sy1
 				if s == 0 { // All adjacent cells are solid, nothing to do...
 					continue
 				}
 
-				div := f.u[(i+1)*numY+j] - f.u[i*numY+j] +
-					f.v[i*numY+j+1] - f.v[i*numY+j]
+				div := f.u[(i+1)*n+j] - f.u[i*n+j] +
+					f.v[i*n+j+1] - f.v[i*n+j]
 
 				p := -div / s
 				p *= Relaxation
-				f.p[i*numY+j] += cp * p
+				f.p[i*n+j] += cp * p
 
-				f.u[i*numY+j] -= sx0 * p
-				f.u[(i+1)*numY+j] += sx1 * p
-				f.v[i*numY+j] -= sy0 * p
-				f.v[i*numY+j+1] += sy1 * p
+				f.u[i*n+j] -= sx0 * p
+				f.u[(i+1)*n+j] += sx1 * p
+				f.v[i*n+j] -= sy0 * p
+				f.v[i*n+j+1] += sy1 * p
 			}
 		}
 	}
 }
 
 func (f *Fluid) handleBorders() {
-	numY := f.numY
+	n := f.numY
 	for i := range f.numX {
-		f.u[i*numY+0] = f.u[i*numY+1]         // top border
-		f.u[(i+1)*numY-1] = f.u[(i+1)*numY-2] // bottom border
+		f.u[i*n+0] = f.u[i*n+1]               // top border
+		f.u[i*n+f.numY-1] = f.u[i*n+f.numY-2] // bottom border
 	}
 
-	numX := f.numX
 	for j := range f.numY {
-		f.v[0*numY+j] = f.v[1*numY+j]               // left border
-		f.v[(numX-1)*numY+j] = f.v[(numX-2)*numY+j] // right border
+		f.v[0*n+j] = f.v[1*n+j]                   // left border
+		f.v[(f.numX-1)*n+j] = f.v[(f.numX-2)*n+j] // right border
 	}
 }
 
 func (f *Fluid) advectVelocity(dt float32) {
 	// TODO: Remove f clearing of the array?
-	for i := range f.numX {
+	for i := range f.numCells {
 		f.newU[i] = f.u[i]
 	}
-	for j := range f.numY {
+	for j := range f.numCells {
 		f.newV[j] = f.v[j]
 	}
 
@@ -128,11 +135,11 @@ func (f *Fluid) advectVelocity(dt float32) {
 	h := f.h
 	h2 := h / 2
 
-	for i := 1; i < f.numX-1; i++ {
-		for j := 1; j < f.numY-1; j++ {
+	for i := 1; i < f.numX; i++ {
+		for j := 1; j < f.numY; j++ {
 
 			// u component
-			if f.s[i*n+j] != 0.0 && f.s[(i-1)*n+j] != 0.0 {
+			if f.s[i*n+j] != 0.0 && f.s[(i-1)*n+j] != 0.0 && j < f.numY-1 {
 				x := float32(i) * h
 				y := float32(j)*h + h2
 				u := f.u[i*n+j]
@@ -145,7 +152,7 @@ func (f *Fluid) advectVelocity(dt float32) {
 			}
 
 			// v component
-			if f.s[i*n+j] != 0.0 && f.s[i*n+j-1] != 0.0 {
+			if f.s[i*n+j] != 0.0 && f.s[i*n+j-1] != 0.0 && i < f.numX-1 {
 				x := float32(i)*h + h2
 				y := float32(j) * h
 				u := f.avgU(i, j)
@@ -159,19 +166,12 @@ func (f *Fluid) advectVelocity(dt float32) {
 		}
 	}
 
-	for i := range f.numX {
+	for i := range f.numCells {
 		f.u[i] = f.newU[i]
 	}
-	for j := range f.numY {
+	for j := range f.numCells {
 		f.v[j] = f.newV[j]
 	}
-}
-
-func (f *Fluid) avgV(i, j int) float32 {
-	numY := f.numY
-	v := (f.v[(i-1)*numY+j] + f.v[i*numY+j] +
-		f.v[(i-1)*numY+j+1] + f.v[i*numY+j+1]) * 0.25
-	return v
 }
 
 func (f *Fluid) avgU(i, j int) float32 {
@@ -179,6 +179,13 @@ func (f *Fluid) avgU(i, j int) float32 {
 	u := (f.u[i*n+j-1] + f.u[i*n+j] +
 		f.u[(i+1)*n+j-1] + f.u[(i+1)*n+j]) * 0.25
 	return u
+}
+
+func (f *Fluid) avgV(i, j int) float32 {
+	n := f.numY
+	v := (f.v[(i-1)*n+j] + f.v[i*n+j] +
+		f.v[(i-1)*n+j+1] + f.v[i*n+j+1]) * 0.25
+	return v
 }
 
 type field int
@@ -191,12 +198,12 @@ const (
 
 func (f *Fluid) sampleField(x, y float32, fld field) float32 {
 	n := f.numY
-	h := float32(f.h)
-	h1 := float32(1.0 / float32(h))
-	h2 := float32(0.5 * float32(h))
+	h := f.h
+	h1 := float32(1.0 / h)
+	h2 := float32(0.5 * h)
 
-	x = max(min(x, float32(f.numX)*h), float32(h))
-	y = max(min(y, float32(f.numY)*h), float32(h))
+	x = max(min(x, float32(f.numX)*h), h)
+	y = max(min(y, float32(f.numY)*h), h)
 
 	dx, dy := float32(0.0), float32(0.0)
 
@@ -209,7 +216,7 @@ func (f *Fluid) sampleField(x, y float32, fld field) float32 {
 		fieldToSample = f.v
 		dx = h2
 	case fieldS:
-		fieldToSample = f.s
+		fieldToSample = f.m
 		dx, dy = h2, h2
 	}
 
