@@ -31,7 +31,7 @@ func NewGame() *Game {
 	// Set no walls except floor
 	for i := range fluidWidth + 2 {
 		for j := range fluidHeight + 2 {
-			if j == 0 || j == fluidHeight+2-1 /* || i == 0 || i == fluidWidth+2-1 */ {
+			if j == 0 || j == fluidHeight+2-1 || i == 0 || i == fluidWidth+2-1 {
 				f.SetSolid(i, j, true)
 			} else {
 				f.SetSolid(i, j, false)
@@ -58,6 +58,9 @@ func (g *Game) Update() error {
 		} else {
 			g.fluid.SetGravity(true)
 		}
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
+		g.fluid.Reset()
 	}
 
 	if g.jet {

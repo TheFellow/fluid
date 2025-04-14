@@ -51,7 +51,7 @@ func fill[T any](slice []T, val T) {
 }
 
 func (f *Fluid) Simulate(dt, gravity float32, numIters uint) {
-	f.handleGravity(dt, gravity)
+	f.handleGravity(dt)
 	fill(f.p, 0)
 	f.makeIncompressible(numIters, dt)
 	f.handleBorders()
@@ -59,7 +59,10 @@ func (f *Fluid) Simulate(dt, gravity float32, numIters uint) {
 	f.advectSmoke(dt)
 }
 
-func (f *Fluid) handleGravity(dt, gravity float32) {
+func (f *Fluid) handleGravity(dt float32) {
+	if f.Gravity == 0 {
+		return
+	}
 	n := f.NumY
 	for i := range f.NumX {
 		for j := range f.NumY {
