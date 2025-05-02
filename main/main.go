@@ -14,10 +14,10 @@ import (
 const (
 	factor = 4
 
-	screenWidth  = 1200
-	screenHeight = 1000
-	fluidWidth   = screenWidth / factor
-	fluidHeight  = screenHeight / factor
+	fluidWidth   = 300
+	fluidHeight  = 251
+	screenWidth  = factor * fluidWidth
+	screenHeight = factor * fluidHeight
 )
 
 type Game struct {
@@ -30,10 +30,10 @@ type Game struct {
 
 func NewGame() *Game {
 	f := fluid.New(1000, fluidWidth, fluidHeight, 1.0/100.0)
-	// Set no walls except floor
+	// Configure walls
 	for i := range fluidWidth + 2 {
 		for j := range fluidHeight + 2 {
-			if j == 0 || j == fluidHeight+2-1 || i == 0 || i == fluidWidth+2-1 {
+			if j == 0 || j == fluidHeight+2-1 || i == 0 /* || i == fluidWidth+2-1 */ {
 				f.SetSolid(i, j, true)
 			} else {
 				f.SetSolid(i, j, false)
@@ -67,7 +67,7 @@ func (g *Game) Update() error {
 
 	if g.jet {
 		x, y := 4.0, 0.0
-		size := 30
+		size := 100
 		for j := fluidHeight/2 - size; j < fluidHeight/2+size; j++ {
 			g.fluid.SetVelocity(1, j, float32(x), float32(y))
 			g.fluid.AddSmoke(1, j, 1.0)
