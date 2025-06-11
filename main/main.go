@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"image"
 	"log"
+	"runtime"
+	"sync"
 
 	"github.com/TheFellow/fluid/pkg/fluid"
 	"github.com/hajimehoshi/ebiten/v2"
@@ -20,9 +22,43 @@ const (
 	screenHeight = factor * fluidHeight
 )
 
+// parallelRange executes fn for each i in [start,end). The range is split among
+// available CPUs.
+func parallelRange(start, end int, fn func(i int)) {
+	total := end - start
+	if total <= 0 {
+		return
+	}
+	workers := runtime.GOMAXPROCS(0)
+	if workers > total {
+		workers = total
+	}
+	var wg sync.WaitGroup
+	chunk := (total + workers - 1) / workers
+	for w := 0; w < workers; w++ {
+		s := start + w*chunk
+		e := s + chunk
+		if e > end {
+			e = end
+		}
+		if s >= end {
+			break
+		}
+		wg.Add(1)
+		go func(ss, ee int) {
+			for i := ss; i < ee; i++ {
+				fn(i)
+			}
+			wg.Done()
+		}(s, e)
+	}
+	wg.Wait()
+}
+
 type Game struct {
-	fluid *fluid.Fluid
-	image *image.RGBA
+	fluid  *fluid.Fluid
+	image  *image.RGBA
+	eImage *ebiten.Image
 
 	showSmoke bool
 	jet       bool
@@ -36,8 +72,8 @@ type Game struct {
 func NewGame() *Game {
 	f := fluid.New(1000, fluidWidth, fluidHeight, 1.0/100.0)
 	// Configure walls
-	for i := range fluidWidth + 2 {
-		for j := range fluidHeight + 2 {
+	for i := 0; i < fluidWidth+2; i++ {
+		for j := 0; j < fluidHeight+2; j++ {
 			if j == 0 || j == fluidHeight+2-1 || i == 0 /* || i == fluidWidth+2-1 */ {
 				f.SetSolid(i, j, true)
 			} else {
@@ -45,9 +81,11 @@ func NewGame() *Game {
 			}
 		}
 	}
+	img := image.NewRGBA(image.Rect(0, 0, fluidWidth+2, fluidHeight+2))
 	return &Game{
 		fluid:     f,
-		image:     image.NewRGBA(image.Rect(0, 0, fluidWidth+2, fluidHeight+2)),
+		image:     img,
+		eImage:    ebiten.NewImageFromImage(img),
 		showSmoke: true,
 	}
 }
@@ -112,8 +150,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	if !g.showSmoke {
 		pressures := g.fluid.Pressure()
-		for i := range pressures.NumX {
-			for j := range pressures.NumY {
+		parallelRange(0, pressures.NumX, func(i int) {
+			for j := 0; j < pressures.NumY; j++ {
 				p, err := pressures.Value(i, pressures.NumY-j-1)
 				if err != nil {
 					log.Panicf("cannot get pressure: %v", err)
@@ -125,14 +163,14 @@ func (g *Game) Draw(screen *ebiten.Image) {
 				g.image.Pix[idx+2] = color.B
 				g.image.Pix[idx+3] = color.A
 			}
-		}
+		})
 	}
 
 	if g.showSmoke {
 		smoke := g.fluid.Smoke()
 
-		for i := range smoke.NumX {
-			for j := range smoke.NumY {
+		parallelRange(0, smoke.NumX, func(i int) {
+			for j := 0; j < smoke.NumY; j++ {
 				s, err := smoke.Value(i, smoke.NumY-j-1)
 				if err != nil {
 					log.Panicf("cannot get smoke: %v", err)
@@ -144,11 +182,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 				g.image.Pix[idx+2] = color.B
 				g.image.Pix[idx+3] = color.A
 			}
-		}
+		})
 	}
 
-	for i := range g.fluid.NumX {
-		for j := range g.fluid.NumY {
+	parallelRange(0, g.fluid.NumX, func(i int) {
+		for j := 0; j < g.fluid.NumY; j++ {
 			if g.fluid.IsSolid(i, g.fluid.NumY-j-1) {
 				idx := g.fluidToImageIndex(i, j)
 				g.image.Pix[idx+0] = 0
@@ -157,11 +195,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 				g.image.Pix[idx+3] = 0xff
 			}
 		}
-	}
+	})
 
 	// render
-	eImage := ebiten.NewImageFromImage(g.image)
-	screen.DrawImage(eImage, drawOpts)
+	g.eImage.ReplacePixels(g.image.Pix)
+	screen.DrawImage(g.eImage, drawOpts)
 	show := "Pressure"
 	if g.showSmoke {
 		show = "Smoke"
