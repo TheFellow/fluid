@@ -54,7 +54,7 @@ func fill[T any](slice []T, val T) {
 	}
 }
 
-func (f *Fluid) Simulate(dt, gravity float32, numIters uint) {
+func (f *Fluid) Simulate(dt float32, numIters uint) {
 	f.handleGravity(dt)
 	fill(f.p, 0)
 	f.makeIncompressible(numIters, dt)
