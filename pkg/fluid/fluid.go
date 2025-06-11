@@ -128,13 +128,35 @@ func (f *Fluid) makeIncompressible(numIters uint, dt float32) {
 func (f *Fluid) handleBorders() {
 	n := f.NumY
 	parallelRange(0, f.NumX, func(i int) {
-		f.u[i*n+0] = f.u[i*n+1]               // top border
-		f.u[i*n+f.NumY-1] = f.u[i*n+f.NumY-2] // bottom border
+		// Top border (j == 0)
+		if f.s[i*n+0] == 0 || f.s[i*n+1] == 0 {
+			f.u[i*n+0] = 0
+		} else {
+			f.u[i*n+0] = f.u[i*n+1]
+		}
+
+		// Bottom border (j == NumY-1)
+		if f.s[i*n+f.NumY-1] == 0 || f.s[i*n+f.NumY-2] == 0 {
+			f.u[i*n+f.NumY-1] = 0
+		} else {
+			f.u[i*n+f.NumY-1] = f.u[i*n+f.NumY-2]
+		}
 	})
 
 	parallelRange(0, f.NumY, func(j int) {
-		f.v[0*n+j] = f.v[1*n+j]                   // left border
-		f.v[(f.NumX-1)*n+j] = f.v[(f.NumX-2)*n+j] // right border
+		// Left border (i == 0)
+		if f.s[0*n+j] == 0 || f.s[1*n+j] == 0 {
+			f.v[0*n+j] = 0
+		} else {
+			f.v[0*n+j] = f.v[1*n+j]
+		}
+
+		// Right border (i == NumX-1)
+		if f.s[(f.NumX-1)*n+j] == 0 || f.s[(f.NumX-2)*n+j] == 0 {
+			f.v[(f.NumX-1)*n+j] = 0
+		} else {
+			f.v[(f.NumX-1)*n+j] = f.v[(f.NumX-2)*n+j]
+		}
 	})
 }
 

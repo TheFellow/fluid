@@ -15,6 +15,24 @@ func (f *Fluid) SetSolid(i, j int, value bool) {
 	} else {
 		f.s[cell] = 1.0
 	}
+
+	// When a cell becomes solid, clear the associated velocities to
+	// immediately enforce the wall boundary. This prevents fluid from
+	// continuing to flow through or along newly created walls.
+	if value {
+		n := f.NumY
+		// Velocities are stored on a staggered grid. Zero out the four
+		// edges surrounding this cell, checking bounds to avoid
+		// out-of-range accesses.
+		f.u[i*n+j] = 0
+		if i+1 < f.NumX {
+			f.u[(i+1)*n+j] = 0
+		}
+		f.v[i*n+j] = 0
+		if j+1 < f.NumY {
+			f.v[i*n+j+1] = 0
+		}
+	}
 }
 
 func (f *Fluid) IsSolid(i, j int) bool {
