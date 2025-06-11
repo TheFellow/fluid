@@ -26,6 +26,11 @@ type Game struct {
 
 	showSmoke bool
 	jet       bool
+
+	dragging  bool
+	dragValue bool
+	prevI     int
+	prevJ     int
 }
 
 func NewGame() *Game {
@@ -67,11 +72,24 @@ func (g *Game) Update() error {
 
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		mx, my := ebiten.CursorPosition()
-		i := mx / factor
-		j := g.fluid.NumY - my/factor - 1
-		if i >= 0 && i < g.fluid.NumX && j >= 0 && j < g.fluid.NumY {
-			g.fluid.SetSolid(i, j, !g.fluid.IsSolid(i, j))
+		i, j := g.screenToFluid(mx, my)
+		if g.inBounds(i, j) {
+			g.dragging = true
+			g.dragValue = !g.fluid.IsSolid(i, j)
+			g.drawLine(i, j, i, j, g.dragValue)
+			g.prevI = i
+			g.prevJ = j
 		}
+	} else if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) && g.dragging {
+		mx, my := ebiten.CursorPosition()
+		i, j := g.screenToFluid(mx, my)
+		if g.inBounds(i, j) && (i != g.prevI || j != g.prevJ) {
+			g.drawLine(g.prevI, g.prevJ, i, j, g.dragValue)
+			g.prevI = i
+			g.prevJ = j
+		}
+	} else if g.dragging {
+		g.dragging = false
 	}
 
 	if g.jet {
@@ -156,6 +174,55 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 func (g *Game) fluidToImageIndex(i, j int) int {
 	return 4*i + j*g.image.Stride
+}
+
+func (g *Game) screenToFluid(mx, my int) (int, int) {
+	w, h := ebiten.WindowSize()
+	i := mx * g.fluid.NumX / w
+	j := g.fluid.NumY - my*g.fluid.NumY/h - 1
+	return i, j
+}
+
+func (g *Game) inBounds(i, j int) bool {
+	return i >= 0 && i < g.fluid.NumX && j >= 0 && j < g.fluid.NumY
+}
+
+func (g *Game) drawLine(x0, y0, x1, y1 int, value bool) {
+	dx := abs(x1 - x0)
+	dy := -abs(y1 - y0)
+	sx := -1
+	if x0 < x1 {
+		sx = 1
+	}
+	sy := -1
+	if y0 < y1 {
+		sy = 1
+	}
+	err := dx + dy
+	for {
+		if g.inBounds(x0, y0) {
+			g.fluid.SetSolid(x0, y0, value)
+		}
+		if x0 == x1 && y0 == y1 {
+			break
+		}
+		e2 := 2 * err
+		if e2 >= dy {
+			err += dy
+			x0 += sx
+		}
+		if e2 <= dx {
+			err += dx
+			y0 += sy
+		}
+	}
+}
+
+func abs(a int) int {
+	if a < 0 {
+		return -a
+	}
+	return a
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (w, hHeight int) {
