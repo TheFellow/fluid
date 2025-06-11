@@ -65,6 +65,15 @@ func (g *Game) Update() error {
 		g.fluid.Reset()
 	}
 
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		mx, my := ebiten.CursorPosition()
+		i := mx / factor
+		j := g.fluid.NumY - my/factor - 1
+		if i >= 0 && i < g.fluid.NumX && j >= 0 && j < g.fluid.NumY {
+			g.fluid.SetSolid(i, j, !g.fluid.IsSolid(i, j))
+		}
+	}
+
 	if g.jet {
 		x, y := 4.0, 0.0
 		size := 100
@@ -116,6 +125,18 @@ func (g *Game) Draw(screen *ebiten.Image) {
 				g.image.Pix[idx+1] = color.G
 				g.image.Pix[idx+2] = color.B
 				g.image.Pix[idx+3] = color.A
+			}
+		}
+	}
+
+	for i := range g.fluid.NumX {
+		for j := range g.fluid.NumY {
+			if g.fluid.IsSolid(i, g.fluid.NumY-j-1) {
+				idx := g.fluidToImageIndex(i, j)
+				g.image.Pix[idx+0] = 0
+				g.image.Pix[idx+1] = 0
+				g.image.Pix[idx+2] = 0
+				g.image.Pix[idx+3] = 0xff
 			}
 		}
 	}
