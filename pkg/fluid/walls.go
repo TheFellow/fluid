@@ -32,6 +32,19 @@ func (f *Fluid) SetSolid(i, j int, value bool) {
 		if j+1 < f.NumY {
 			f.v[i*n+j+1] = 0
 		}
+
+		// Clear any in-flight velocities that may still reside in the
+		// temporary buffers used during simulation steps. Without this,
+		// advecting the velocity field would reintroduce non-zero values
+		// after the wall is drawn.
+		f.newU[i*n+j] = 0
+		if i+1 < f.NumX {
+			f.newU[(i+1)*n+j] = 0
+		}
+		f.newV[i*n+j] = 0
+		if j+1 < f.NumY {
+			f.newV[i*n+j+1] = 0
+		}
 	}
 }
 
