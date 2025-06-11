@@ -63,6 +63,11 @@ type Game struct {
 	showSmoke bool
 	jet       bool
 
+	wallTop    bool
+	wallBottom bool
+	wallLeft   bool
+	wallRight  bool
+
 	dragging  bool
 	dragValue bool
 	prevI     int
@@ -71,23 +76,26 @@ type Game struct {
 
 func NewGame() *Game {
 	f := fluid.New(1000, fluidWidth, fluidHeight, 1.0/100.0)
-	// Configure walls
-	for i := 0; i < fluidWidth+2; i++ {
-		for j := 0; j < fluidHeight+2; j++ {
-			if j == 0 || j == fluidHeight+2-1 || i == 0 /* || i == fluidWidth+2-1 */ {
-				f.SetSolid(i, j, true)
-			} else {
-				f.SetSolid(i, j, false)
-			}
+	img := image.NewRGBA(image.Rect(0, 0, fluidWidth+2, fluidHeight+2))
+	g := &Game{
+		fluid:      f,
+		image:      img,
+		eImage:     ebiten.NewImageFromImage(img),
+		showSmoke:  true,
+		wallTop:    true,
+		wallBottom: true,
+		wallLeft:   true,
+		wallRight:  false,
+	}
+
+	// Initialize all cells as empty and apply the boundary walls
+	for i := 0; i < g.fluid.NumX; i++ {
+		for j := 0; j < g.fluid.NumY; j++ {
+			g.fluid.SetSolid(i, j, false)
 		}
 	}
-	img := image.NewRGBA(image.Rect(0, 0, fluidWidth+2, fluidHeight+2))
-	return &Game{
-		fluid:     f,
-		image:     img,
-		eImage:    ebiten.NewImageFromImage(img),
-		showSmoke: true,
-	}
+	g.applyWallSettings()
+	return g
 }
 
 func (g *Game) Update() error {
@@ -106,6 +114,25 @@ func (g *Game) Update() error {
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
 		g.fluid.Reset()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyUp) {
+		g.wallTop = !g.wallTop
+		g.applyWallSettings()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyDown) {
+		g.wallBottom = !g.wallBottom
+		g.applyWallSettings()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyLeft) {
+		g.wallLeft = !g.wallLeft
+		g.applyWallSettings()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyRight) {
+		g.wallRight = !g.wallRight
+		g.applyWallSettings()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyC) {
+		g.clearWalls()
 	}
 
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
@@ -204,9 +231,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	if g.showSmoke {
 		show = "Smoke"
 	}
+	wallInfo := fmt.Sprintf("U:%v D:%v L:%v R:%v",
+		g.wallTop, g.wallBottom, g.wallLeft, g.wallRight)
 	ebitenutil.DebugPrint(screen,
-		fmt.Sprintf("FPS: %0.2f [S]how: %v\n[J]et: %v [G]ravity: %0.2f",
-			ebiten.ActualFPS(), show, g.jet, g.fluid.Gravity),
+		fmt.Sprintf("FPS: %0.2f [S]how: %v\n[J]et: %v [G]ravity: %0.2f\n%s",
+			ebiten.ActualFPS(), show, g.jet, g.fluid.Gravity, wallInfo),
 	)
 }
 
@@ -256,6 +285,26 @@ func (g *Game) drawLine(x0, y0, x1, y1 int, value bool) {
 			y0 += sy
 		}
 	}
+}
+
+func (g *Game) applyWallSettings() {
+	for i := 0; i < g.fluid.NumX; i++ {
+		g.fluid.SetSolid(i, 0, g.wallBottom)
+		g.fluid.SetSolid(i, g.fluid.NumY-1, g.wallTop)
+	}
+	for j := 0; j < g.fluid.NumY; j++ {
+		g.fluid.SetSolid(0, j, g.wallLeft)
+		g.fluid.SetSolid(g.fluid.NumX-1, j, g.wallRight)
+	}
+}
+
+func (g *Game) clearWalls() {
+	for i := 0; i < g.fluid.NumX; i++ {
+		for j := 0; j < g.fluid.NumY; j++ {
+			g.fluid.SetSolid(i, j, false)
+		}
+	}
+	g.applyWallSettings()
 }
 
 func abs(a int) int {
