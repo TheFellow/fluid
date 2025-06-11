@@ -72,10 +72,11 @@ func (f *Fluid) handleGravity(dt float32) {
 	}
 	n := f.NumY
 	parallelRange(0, f.NumX, func(i int) {
-		for j := 0; j < f.NumY; j++ {
-			if i*n+j-1 < 0 {
-				continue
-			}
+		// Skip the bottom boundary row to avoid out-of-range access when
+		// referencing j-1. Gravity only affects interior interfaces.
+		for j := 1; j < f.NumY; j++ {
+			// Apply gravity only when both the current cell and the
+			// cell below are fluid.
 			if f.s[i*n+j] != 0.0 && f.s[i*n+j-1] != 0.0 {
 				f.v[i*n+j] += f.Gravity * dt
 			}
