@@ -167,7 +167,7 @@ func (g *Game) Update() error {
 	}
 
 	dt := float32(1.0 / float32(120))
-	g.fluid.Simulate(dt, g.fluid.Gravity, 20)
+	g.fluid.Simulate(dt, 20)
 	return nil
 }
 
