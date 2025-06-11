@@ -250,7 +250,6 @@ func (f *Fluid) sampleField(x, y float32, fld field) float32 {
 
 func (f *Fluid) advectSmoke(dt float32) {
 	// Copy border cells first so advection doesn't alter boundary values.
-	f.copyBorder(f.newM, f.m)
 
 	n := f.NumY
 	h := f.h
@@ -306,7 +305,6 @@ func (f *Fluid) applyVorticityConfinement(dt float32) {
 		}
 	}
 
-	for j := 0; j < f.NumY; j++ {
 		dst[0*n+j] = src[0*n+j]
 		dst[(f.NumX-1)*n+j] = src[(f.NumX-1)*n+j]
 	}
