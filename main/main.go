@@ -177,9 +177,11 @@ func (g *Game) fluidToImageIndex(i, j int) int {
 }
 
 func (g *Game) screenToFluid(mx, my int) (int, int) {
-	w, h := ebiten.WindowSize()
-	i := mx * g.fluid.NumX / w
-	j := g.fluid.NumY - my*g.fluid.NumY/h - 1
+	// CursorPosition already returns coordinates in the game's logical
+	// resolution defined by Layout. As Layout returns the fluid grid size,
+	// simply flip the y axis to convert to the fluid coordinates.
+	i := mx
+	j := g.fluid.NumY - my - 1
 	return i, j
 }
 
