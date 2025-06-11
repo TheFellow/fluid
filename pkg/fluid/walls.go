@@ -62,5 +62,9 @@ func (f *Fluid) SetGravity(on bool) {
 func (f *Fluid) Reset() {
 	fill(f.u, 0.0)
 	fill(f.v, 0.0)
+	fill(f.newU, 0.0)
+	fill(f.newV, 0.0)
+	fill(f.p, 0.0)
 	fill(f.m, 0.0)
+	fill(f.newM, 0.0)
 }
