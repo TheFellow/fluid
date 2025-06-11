@@ -132,6 +132,8 @@ func (f *Fluid) handleBorders() {
 }
 
 func (f *Fluid) advectVelocity(dt float32) {
+	// Preserve boundaries by copying them into the destination slices
+	// before computing the interior advection.
 	f.copyBorder(f.newU, f.u)
 	f.copyBorder(f.newV, f.v)
 
@@ -240,7 +242,7 @@ func (f *Fluid) sampleField(x, y float32, fld field) float32 {
 }
 
 func (f *Fluid) advectSmoke(dt float32) {
-	f.copyBorder(f.newM, f.m)
+	// Copy border cells first so advection doesn't alter boundary values.
 	f.copyBorder(f.newM, f.m)
 
 	n := f.NumY
