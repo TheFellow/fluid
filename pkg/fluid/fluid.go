@@ -271,7 +271,7 @@ func (f *Fluid) copyBorder(dst, src []float32) {
 		dst[i*n+f.NumY-1] = src[i*n+f.NumY-1]
 	}
 	for j := 0; j < f.NumY; j++ {
-		dst[0+j] = src[0+j]
-		dst[f.NumX+j] = src[f.NumX+j]
+		dst[0*n+j] = src[0*n+j]
+		dst[(f.NumX-1)*n+j] = src[(f.NumX-1)*n+j]
 	}
 }
