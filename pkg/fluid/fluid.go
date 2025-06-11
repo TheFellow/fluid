@@ -22,6 +22,9 @@ type Fluid struct {
 
 	m    []float32 // smoke
 	newM []float32
+
+	// Strength of the vorticity confinement force. Set to 0 to disable.
+	Confinement float32
 }
 
 func New(density float32, width, height int, h float32) *Fluid {
@@ -30,17 +33,18 @@ func New(density float32, width, height int, h float32) *Fluid {
 		density: density,
 		h:       h,
 
-		NumX:     width + 2,  // LR border cells
-		NumY:     height + 2, // TB border cells
-		numCells: numCells,
-		u:        make([]float32, numCells),
-		v:        make([]float32, numCells),
-		newU:     make([]float32, numCells),
-		newV:     make([]float32, numCells),
-		p:        make([]float32, numCells),
-		s:        make([]float32, numCells),
-		m:        make([]float32, numCells),
-		newM:     make([]float32, numCells),
+		NumX:        width + 2,  // LR border cells
+		NumY:        height + 2, // TB border cells
+		numCells:    numCells,
+		u:           make([]float32, numCells),
+		v:           make([]float32, numCells),
+		newU:        make([]float32, numCells),
+		newV:        make([]float32, numCells),
+		p:           make([]float32, numCells),
+		s:           make([]float32, numCells),
+		m:           make([]float32, numCells),
+		newM:        make([]float32, numCells),
+		Confinement: 0,
 	}
 }
 
@@ -54,6 +58,9 @@ func (f *Fluid) Simulate(dt, gravity float32, numIters uint) {
 	f.handleGravity(dt)
 	fill(f.p, 0)
 	f.makeIncompressible(numIters, dt)
+	if f.Confinement != 0 {
+		f.applyVorticityConfinement(dt)
+	}
 	f.handleBorders()
 	f.advectVelocity(dt)
 	f.advectSmoke(dt)
@@ -132,6 +139,8 @@ func (f *Fluid) handleBorders() {
 }
 
 func (f *Fluid) advectVelocity(dt float32) {
+	// Preserve boundaries by copying them into the destination slices
+	// before computing the interior advection.
 	f.copyBorder(f.newU, f.u)
 	f.copyBorder(f.newV, f.v)
 
@@ -272,7 +281,52 @@ func (f *Fluid) copyBorder(dst, src []float32) {
 		dst[i*n+f.NumY-1] = src[i*n+f.NumY-1]
 	})
 	parallelRange(0, f.NumY, func(j int) {
-		dst[0+j] = src[0+j]
+		dst[0*n+j] = src[0*n+j]
 		dst[(f.NumX-1)*n+j] = src[(f.NumX-1)*n+j]
 	})
+}
+
+// applyVorticityConfinement computes the curl of the velocity field and
+// applies a confinement force to enhance small scale swirling motion.
+func (f *Fluid) applyVorticityConfinement(dt float32) {
+	n := f.NumY
+	h := f.h
+
+	curl := make([]float32, f.numCells)
+
+	// compute curl (v_x - u_y)
+	for i := 1; i < f.NumX-1; i++ {
+		for j := 1; j < f.NumY-1; j++ {
+			if f.s[i*n+j] == 0 {
+				continue
+			}
+
+			dvdx := (f.v[(i+1)*n+j] - f.v[(i-1)*n+j]) * 0.5 / h
+			dudy := (f.u[i*n+j+1] - f.u[i*n+j-1]) * 0.5 / h
+			curl[i*n+j] = dvdx - dudy
+		}
+	}
+
+	eps := float32(1e-5)
+	for i := 1; i < f.NumX-1; i++ {
+		for j := 1; j < f.NumY-1; j++ {
+			if f.s[i*n+j] == 0 {
+				continue
+			}
+
+			// gradient of magnitude of curl
+			gx := (float32(math.Abs(float64(curl[(i+1)*n+j]))) - float32(math.Abs(float64(curl[(i-1)*n+j])))) * 0.5 / h
+			gy := (float32(math.Abs(float64(curl[i*n+j+1]))) - float32(math.Abs(float64(curl[i*n+j-1])))) * 0.5 / h
+
+			mag := float32(math.Sqrt(float64(gx*gx+gy*gy))) + eps
+			gx /= mag
+			gy /= mag
+
+			vort := curl[i*n+j]
+
+			f.u[i*n+j] += f.Confinement * gy * vort * dt
+			f.v[i*n+j] -= f.Confinement * gx * vort * dt
+		}
+	}
+
 }

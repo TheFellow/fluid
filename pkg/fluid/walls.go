@@ -17,6 +17,17 @@ func (f *Fluid) SetSolid(i, j int, value bool) {
 	}
 }
 
+func (f *Fluid) IsSolid(i, j int) bool {
+	if i < 0 || i >= f.NumX {
+		panic(fmt.Sprintf("invalid x-index: %d", i))
+	}
+	if j < 0 || j >= f.NumY {
+		panic(fmt.Sprintf("invalid y-index: %d", j))
+	}
+	cell := i*f.NumY + j
+	return f.s[cell] == 0.0
+}
+
 func (f *Fluid) SetVelocity(i, j int, u, v float32) {
 	if i < 0 || i >= f.NumX {
 		panic(fmt.Sprintf("invalid x-index: %d", i))
