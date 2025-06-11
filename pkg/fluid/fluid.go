@@ -64,8 +64,8 @@ func (f *Fluid) handleGravity(dt float32) {
 		return
 	}
 	n := f.NumY
-	for i := range f.NumX {
-		for j := range f.NumY {
+	parallelRange(0, f.NumX, func(i int) {
+		for j := 0; j < f.NumY; j++ {
 			if i*n+j-1 < 0 {
 				continue
 			}
@@ -73,7 +73,7 @@ func (f *Fluid) handleGravity(dt float32) {
 				f.v[i*n+j] += f.Gravity * dt
 			}
 		}
-	}
+	})
 }
 
 func (f *Fluid) makeIncompressible(numIters uint, dt float32) {
@@ -120,15 +120,15 @@ func (f *Fluid) makeIncompressible(numIters uint, dt float32) {
 
 func (f *Fluid) handleBorders() {
 	n := f.NumY
-	for i := range f.NumX {
+	parallelRange(0, f.NumX, func(i int) {
 		f.u[i*n+0] = f.u[i*n+1]               // top border
 		f.u[i*n+f.NumY-1] = f.u[i*n+f.NumY-2] // bottom border
-	}
+	})
 
-	for j := range f.NumY {
+	parallelRange(0, f.NumY, func(j int) {
 		f.v[0*n+j] = f.v[1*n+j]                   // left border
 		f.v[(f.NumX-1)*n+j] = f.v[(f.NumX-2)*n+j] // right border
-	}
+	})
 }
 
 func (f *Fluid) advectVelocity(dt float32) {
@@ -139,7 +139,7 @@ func (f *Fluid) advectVelocity(dt float32) {
 	h := f.h
 	h2 := h / 2
 
-	for i := 1; i < f.NumX; i++ {
+	parallelRange(1, f.NumX, func(i int) {
 		for j := 1; j < f.NumY; j++ {
 
 			// u component
@@ -168,7 +168,7 @@ func (f *Fluid) advectVelocity(dt float32) {
 				f.newV[i*n+j] = v
 			}
 		}
-	}
+	})
 
 	copy(f.u, f.newU)
 	copy(f.v, f.newV)
@@ -240,14 +240,15 @@ func (f *Fluid) sampleField(x, y float32, fld field) float32 {
 }
 
 func (f *Fluid) advectSmoke(dt float32) {
-	f.copyBorder(f.newM, f.m)
+	// Copy existing smoke values into the working buffer so border cells are
+	// initialized correctly before advection.
 	f.copyBorder(f.newM, f.m)
 
 	n := f.NumY
 	h := f.h
 	h2 := 0.5 * h
 
-	for i := 1; i < f.NumX-1; i++ {
+	parallelRange(1, f.NumX-1, func(i int) {
 		for j := 1; j < f.NumY-1; j++ {
 
 			if f.s[i*n+j] != 0.0 {
@@ -259,19 +260,19 @@ func (f *Fluid) advectSmoke(dt float32) {
 				f.newM[i*n+j] = f.sampleField(x, y, fieldM)
 			}
 		}
-	}
+	})
 
 	copy(f.m, f.newM)
 }
 
 func (f *Fluid) copyBorder(dst, src []float32) {
 	n := f.NumY
-	for i := 0; i < f.NumX; i++ {
+	parallelRange(0, f.NumX, func(i int) {
 		dst[i*n+0] = src[i*n+0]
 		dst[i*n+f.NumY-1] = src[i*n+f.NumY-1]
-	}
-	for j := 0; j < f.NumY; j++ {
+	})
+	parallelRange(0, f.NumY, func(j int) {
 		dst[0+j] = src[0+j]
-		dst[f.NumX+j] = src[f.NumX+j]
-	}
+		dst[(f.NumX-1)*n+j] = src[(f.NumX-1)*n+j]
+	})
 }
