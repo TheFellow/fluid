@@ -268,7 +268,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 				y1 := float64(g.fluid.NumY - j - 1)
 				x2 := x1 + float64(u)*scale
 				y2 := y1 - float64(v)*scale
-				ebitenutil.DrawLine(screen, x1, y1, x2, y2, color.RGBA{255, 0, 0, 255})
+				ebitenutil.DrawLine(screen, x1, y1, x2, y2, color.RGBA{0, 0, 0, 128})
 			}
 		}
 	}
