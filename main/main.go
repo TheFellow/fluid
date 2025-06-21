@@ -122,7 +122,7 @@ func (g *Game) Update() error {
 		if g.fluid.Confinement != 0 {
 			g.fluid.Confinement = 0
 		} else {
-			g.fluid.Confinement = 5
+			g.fluid.Confinement = 0.1
 		}
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyA) {
