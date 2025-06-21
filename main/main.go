@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"log"
 	"runtime"
 	"sync"
@@ -63,6 +64,10 @@ type Game struct {
 	showSmoke bool
 	jet       bool
 
+	showArrows bool
+	paused     bool
+	speed      float32
+
 	wallTop    bool
 	wallBottom bool
 	wallLeft   bool
@@ -82,6 +87,7 @@ func NewGame() *Game {
 		image:      img,
 		eImage:     ebiten.NewImageFromImage(img),
 		showSmoke:  true,
+		speed:      1.0,
 		wallTop:    true,
 		wallBottom: true,
 		wallLeft:   true,
@@ -110,6 +116,28 @@ func (g *Game) Update() error {
 			g.fluid.SetGravity(false)
 		} else {
 			g.fluid.SetGravity(true)
+		}
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyV) {
+		if g.fluid.Confinement != 0 {
+			g.fluid.Confinement = 0
+		} else {
+			g.fluid.Confinement = 5
+		}
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyA) {
+		g.showArrows = !g.showArrows
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
+		g.paused = !g.paused
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEqual) || inpututil.IsKeyJustPressed(ebiten.KeyKPAdd) {
+		g.speed *= 1.1
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyMinus) || inpututil.IsKeyJustPressed(ebiten.KeyKPSubtract) {
+		g.speed /= 1.1
+		if g.speed < 0.01 {
+			g.speed = 0.01
 		}
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
@@ -166,8 +194,10 @@ func (g *Game) Update() error {
 		}
 	}
 
-	dt := float32(1.0 / float32(120))
-	g.fluid.Simulate(dt, 20)
+	dt := float32(1.0/120.0) * g.speed
+	if !g.paused {
+		g.fluid.Simulate(dt, 20)
+	}
 	return nil
 }
 
@@ -227,6 +257,21 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// render
 	g.eImage.ReplacePixels(g.image.Pix)
 	screen.DrawImage(g.eImage, drawOpts)
+	if g.showArrows {
+		vel := g.fluid.Velocity()
+		step := 10
+		scale := float64(10)
+		for i := 1; i < vel.NumX-1; i += step {
+			for j := 1; j < vel.NumY-1; j += step {
+				u, v, _ := vel.Value(i, j)
+				x1 := float64(i)
+				y1 := float64(g.fluid.NumY - j - 1)
+				x2 := x1 + float64(u)*scale
+				y2 := y1 - float64(v)*scale
+				ebitenutil.DrawLine(screen, x1, y1, x2, y2, color.RGBA{255, 0, 0, 255})
+			}
+		}
+	}
 	show := "Pressure"
 	if g.showSmoke {
 		show = "Smoke"
@@ -234,8 +279,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	wallInfo := fmt.Sprintf("U:%v D:%v L:%v R:%v",
 		g.wallTop, g.wallBottom, g.wallLeft, g.wallRight)
 	ebitenutil.DebugPrint(screen,
-		fmt.Sprintf("FPS: %0.2f [S]how: %v\n[J]et: %v [G]ravity: %0.2f\n%s",
-			ebiten.ActualFPS(), show, g.jet, g.fluid.Gravity, wallInfo),
+		fmt.Sprintf("FPS: %0.2f [S]how:%v Speed:%0.2f\n[J]et:%v [G]ravity:%0.2f [V]ort:%v [A]rrows:%v Paused:%v\n%s",
+			ebiten.ActualFPS(), show, g.speed, g.jet, g.fluid.Gravity, g.fluid.Confinement != 0, g.showArrows, g.paused, wallInfo),
 	)
 }
 
