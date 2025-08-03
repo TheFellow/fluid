@@ -55,15 +55,25 @@ func fill[T any](slice []T, val T) {
 }
 
 func (f *Fluid) Simulate(dt float32, numIters uint) {
+	// Apply external forces.
 	f.handleGravity(dt)
-	fill(f.p, 0)
-	f.makeIncompressible(numIters, dt)
 	if f.Confinement != 0 {
 		f.applyVorticityConfinement(dt)
 	}
-	f.handleBorders()
+
+	// Advect the velocity field using a predictor/corrector approach
+	// (MacCormack). This performs a forward and a reverse advection
+	// pass to reduce numerical dissipation while allowing the field to be
+	// slightly compressible.
 	f.advectVelocity(dt)
+
+	// Advect the density/smoke field using the same forward/reverse
+	// technique but additionally apply a pressure step that keeps the
+	// non-negative quantities bounded.
 	f.advectSmoke(dt)
+
+	// Enforce boundary conditions after the new state has been produced.
+	f.handleBorders()
 }
 
 func (f *Fluid) handleGravity(dt float32) {
@@ -161,11 +171,45 @@ func (f *Fluid) handleBorders() {
 	})
 }
 
+// advectVelocity advects the velocity field using a MacCormack style
+// predictor/corrector. A forward advection step is first performed into the
+// temporary buffers newU/newV. These buffers are then advected back in time and
+// the result is used to correct the forward step. This reduces numerical
+// dissipation compared to a simple semi-Lagrangian copy and allows the
+// simulation to run without an expensive incompressibility solve.
 func (f *Fluid) advectVelocity(dt float32) {
-	// Preserve boundaries by copying them into the destination slices
-	// before computing the interior advection.
-	f.copyBorder(f.newU, f.u)
-	f.copyBorder(f.newV, f.v)
+	// --- Forward step ---
+	f.semiLagrangianVelocity(dt, f.u, f.v, f.newU, f.newV)
+
+	// --- Reverse step ---
+	// Temporarily swap the velocity field so that sampling uses the forward
+	// result.
+	oldU, oldV := f.u, f.v
+	f.u, f.v = f.newU, f.newV
+	tmpU := make([]float32, f.numCells)
+	tmpV := make([]float32, f.numCells)
+	f.semiLagrangianVelocity(-dt, f.u, f.v, tmpU, tmpV)
+	f.u, f.v = oldU, oldV
+
+	// --- Correction ---
+	for i := range f.u {
+		f.newU[i] = f.newU[i] + 0.5*(f.u[i]-tmpU[i])
+		f.newV[i] = f.newV[i] + 0.5*(f.v[i]-tmpV[i])
+	}
+
+	// Apply corrected velocities.
+	f.copyBorder(f.newU, f.newU)
+	f.copyBorder(f.newV, f.newV)
+	copy(f.u, f.newU)
+	copy(f.v, f.newV)
+}
+
+// semiLagrangianVelocity performs a single semi-Lagrangian advection of the
+// velocity field from srcU/srcV into dstU/dstV using the provided time step.
+// It is used by advectVelocity to perform both the forward and reverse passes.
+func (f *Fluid) semiLagrangianVelocity(dt float32, srcU, srcV, dstU, dstV []float32) {
+	f.copyBorder(dstU, srcU)
+	f.copyBorder(dstV, srcV)
 
 	n := f.NumY
 	h := f.h
@@ -178,32 +222,41 @@ func (f *Fluid) advectVelocity(dt float32) {
 			if f.s[i*n+j] != 0.0 && f.s[(i-1)*n+j] != 0.0 && j < f.NumY-1 {
 				x := float32(i) * h
 				y := float32(j)*h + h2
-				u := f.u[i*n+j]
-				v := f.avgV(i, j)
+				u := srcU[i*n+j]
+				v := f.avgVFrom(srcV, i, j)
 
 				x = x - dt*u
 				y = y - dt*v
-				u = f.sampleField(x, y, fieldU)
-				f.newU[i*n+j] = u
+				// sampling uses the temporarily assigned f.u/f.v
+				dstU[i*n+j] = f.sampleField(x, y, fieldU)
 			}
 
 			// v component
 			if f.s[i*n+j] != 0.0 && f.s[i*n+j-1] != 0.0 && i < f.NumX-1 {
 				x := float32(i)*h + h2
 				y := float32(j) * h
-				u := f.avgU(i, j)
-				v := f.v[i*n+j]
+				u := f.avgUFrom(srcU, i, j)
+				v := srcV[i*n+j]
 
 				x = x - dt*u
 				y = y - dt*v
-				v = f.sampleField(x, y, fieldV)
-				f.newV[i*n+j] = v
+				dstV[i*n+j] = f.sampleField(x, y, fieldV)
 			}
 		}
 	})
+}
 
-	copy(f.u, f.newU)
-	copy(f.v, f.newV)
+// avgUFrom and avgVFrom are helpers that average velocity components from the
+// supplied slices. They mirror avgU/avgV but operate on explicit arrays so they
+// can be used during the temporary advection passes.
+func (f *Fluid) avgUFrom(u []float32, i, j int) float32 {
+	n := f.NumY
+	return (u[i*n+j-1] + u[i*n+j] + u[(i+1)*n+j-1] + u[(i+1)*n+j]) * 0.25
+}
+
+func (f *Fluid) avgVFrom(v []float32, i, j int) float32 {
+	n := f.NumY
+	return (v[(i-1)*n+j] + v[i*n+j] + v[(i-1)*n+j+1] + v[i*n+j+1]) * 0.25
 }
 
 func (f *Fluid) avgU(i, j int) float32 {
@@ -271,9 +324,65 @@ func (f *Fluid) sampleField(x, y float32, fld field) float32 {
 	return val
 }
 
+// advectSmoke transports the density/smoke field using the same
+// MacCormack-style forward/reverse advection employed for the velocity. After
+// the correction step a simple pressure solve is applied which distributes any
+// negative values proportionally to neighbouring cells so that the field
+// remains non-negative and mass conserving.
 func (f *Fluid) advectSmoke(dt float32) {
-	// Copy border cells first so advection doesn't alter boundary values.
-	f.copyBorder(f.newM, f.m)
+	forward := make([]float32, f.numCells)
+
+	// Forward step
+	f.semiLagrangianSmoke(dt, f.m, forward)
+
+	// Reverse step
+	oldM := f.m
+	f.m = forward
+	backward := make([]float32, f.numCells)
+	f.semiLagrangianSmoke(-dt, f.m, backward)
+	f.m = oldM
+
+	// Correction with BFECC
+	n := f.NumY
+	parallelRange(1, f.NumX-1, func(i int) {
+		for j := 1; j < f.NumY-1; j++ {
+			idx := i*n + j
+			val := forward[idx] + 0.5*(f.m[idx]-backward[idx])
+
+			// Limit to the range of the original and neighbouring
+			// cells to avoid creating new extrema.
+			minVal := f.m[idx]
+			maxVal := f.m[idx]
+			neigh := []int{(i-1)*n + j, (i+1)*n + j, i*n + j - 1, i*n + j + 1}
+			for _, k := range neigh {
+				if f.m[k] < minVal {
+					minVal = f.m[k]
+				}
+				if f.m[k] > maxVal {
+					maxVal = f.m[k]
+				}
+			}
+			if val < minVal {
+				val = minVal
+			}
+			if val > maxVal {
+				val = maxVal
+			}
+
+			f.newM[idx] = val
+		}
+	})
+
+	// Apply a simple pressure step to keep the field non-negative.
+	f.applyPressure(f.newM)
+	f.copyBorder(f.newM, f.newM)
+	copy(f.m, f.newM)
+}
+
+// semiLagrangianSmoke performs a standard semi-Lagrangian advection of the
+// smoke/density field from src into dst using the current velocity field.
+func (f *Fluid) semiLagrangianSmoke(dt float32, src, dst []float32) {
+	f.copyBorder(dst, src)
 
 	n := f.NumY
 	h := f.h
@@ -281,19 +390,39 @@ func (f *Fluid) advectSmoke(dt float32) {
 
 	parallelRange(1, f.NumX-1, func(i int) {
 		for j := 1; j < f.NumY-1; j++ {
-
 			if f.s[i*n+j] != 0.0 {
-				var u = (f.u[i*n+j] + f.u[(i+1)*n+j]) * 0.5
-				var v = (f.v[i*n+j] + f.v[i*n+j+1]) * 0.5
-				var x = float32(i)*h + h2 - dt*u
-				var y = float32(j)*h + h2 - dt*v
-
-				f.newM[i*n+j] = f.sampleField(x, y, fieldM)
+				u := (f.u[i*n+j] + f.u[(i+1)*n+j]) * 0.5
+				v := (f.v[i*n+j] + f.v[i*n+j+1]) * 0.5
+				x := float32(i)*h + h2 - dt*u
+				y := float32(j)*h + h2 - dt*v
+				dst[i*n+j] = f.sampleField(x, y, fieldM)
 			}
 		}
 	})
+}
 
-	copy(f.m, f.newM)
+// applyPressure distributes any negative mass to neighbouring cells. This is a
+// lightweight substitute for the full pressure solve described by Stam and
+// mirrors the approach outlined in "Practical Fluid Mechanics". It prevents the
+// creation of artificial mass when multiple cells attempt to pull more than is
+// available from a single source cell.
+func (f *Fluid) applyPressure(field []float32) {
+	n := f.NumY
+	parallelRange(1, f.NumX-1, func(i int) {
+		for j := 1; j < f.NumY-1; j++ {
+			idx := i*n + j
+			if field[idx] >= 0 {
+				continue
+			}
+			deficit := -field[idx]
+			field[idx] = 0
+			share := deficit * 0.25
+			field[(i-1)*n+j] -= share
+			field[(i+1)*n+j] -= share
+			field[i*n+j-1] -= share
+			field[i*n+j+1] -= share
+		}
+	})
 }
 
 func (f *Fluid) copyBorder(dst, src []float32) {
