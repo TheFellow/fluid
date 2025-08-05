@@ -4,10 +4,6 @@ import (
 	"math"
 )
 
-var (
-	Relaxation float32 = 1.9
-)
-
 type Fluid struct {
 	density float32
 	h       float32
@@ -54,25 +50,19 @@ func fill[T any](slice []T, val T) {
 	}
 }
 
-func (f *Fluid) Simulate(dt float32, numIters uint) {
+func (f *Fluid) Simulate(dt float32) {
 	// Apply external forces.
 	f.handleGravity(dt)
 	if f.Confinement != 0 {
 		f.applyVorticityConfinement(dt)
 	}
 
-	// Advect the velocity field using a predictor/corrector approach
-	// (MacCormack). This performs a forward and a reverse advection
-	// pass to reduce numerical dissipation while allowing the field to be
-	// slightly compressible.
-	f.advectVelocity(dt)
+	// Use BFECC advection for both velocity and smoke
+	// This eliminates the need for the incompressibility solve
+	f.advectVelocityBFECC(dt)
+	f.advectSmokeBFECC(dt)
 
-	// Advect the density/smoke field using the same forward/reverse
-	// technique but additionally apply a pressure step that keeps the
-	// non-negative quantities bounded.
-	f.advectSmoke(dt)
-
-	// Enforce boundary conditions after the new state has been produced.
+	// Only handle boundary conditions - no pressure solve needed
 	f.handleBorders()
 }
 
@@ -92,48 +82,6 @@ func (f *Fluid) handleGravity(dt float32) {
 			}
 		}
 	})
-}
-
-func (f *Fluid) makeIncompressible(numIters uint, dt float32) {
-	f.copyBorder(f.newU, f.u)
-	f.copyBorder(f.newV, f.v)
-
-	n := f.NumY
-	cp := f.density * float32(f.h) / dt
-
-	for range numIters {
-
-		for i := 1; i < f.NumX-1; i++ {
-			for j := 1; j < f.NumY-1; j++ {
-
-				// If the cell is solid, nothing to do...
-				if f.s[i*n+j] == 0 {
-					continue
-				}
-
-				sx0 := f.s[(i-1)*n+j]
-				sx1 := f.s[(i+1)*n+j]
-				sy0 := f.s[i*n+j-1]
-				sy1 := f.s[i*n+j+1]
-				s := sx0 + sx1 + sy0 + sy1
-				if s == 0 { // All adjacent cells are solid, nothing to do...
-					continue
-				}
-
-				div := f.u[(i+1)*n+j] - f.u[i*n+j] +
-					f.v[i*n+j+1] - f.v[i*n+j]
-
-				p := -div / s
-				p *= Relaxation
-				f.p[i*n+j] += cp * p
-
-				f.u[i*n+j] -= sx0 * p
-				f.u[(i+1)*n+j] += sx1 * p
-				f.v[i*n+j] -= sy0 * p
-				f.v[i*n+j+1] += sy1 * p
-			}
-		}
-	}
 }
 
 func (f *Fluid) handleBorders() {
@@ -171,42 +119,90 @@ func (f *Fluid) handleBorders() {
 	})
 }
 
-// advectVelocity advects the velocity field using a MacCormack style
-// predictor/corrector. A forward advection step is first performed into the
-// temporary buffers newU/newV. These buffers are then advected back in time and
-// the result is used to correct the forward step. This reduces numerical
-// dissipation compared to a simple semi-Lagrangian copy and allows the
-// simulation to run without an expensive incompressibility solve.
-func (f *Fluid) advectVelocity(dt float32) {
-	// --- Forward step ---
+// advectVelocityBFECC uses the BFECC (Back and Forth Error Compensation and Correction)
+// method to advect velocity with minimal numerical dissipation and inherent stability
+func (f *Fluid) advectVelocityBFECC(dt float32) {
+	// Forward advection step
 	f.semiLagrangianVelocity(dt, f.u, f.v, f.newU, f.newV)
 
-	// --- Reverse step ---
-	// Temporarily swap the velocity field so that sampling uses the forward
-	// result.
-	oldU, oldV := f.u, f.v
-	f.u, f.v = f.newU, f.newV
+	// Store forward results
+	forwardU := make([]float32, f.numCells)
+	forwardV := make([]float32, f.numCells)
+	copy(forwardU, f.newU)
+	copy(forwardV, f.newV)
+
+	// Reverse advection step - advect the forward result backward
 	tmpU := make([]float32, f.numCells)
 	tmpV := make([]float32, f.numCells)
-	f.semiLagrangianVelocity(-dt, f.u, f.v, tmpU, tmpV)
-	f.u, f.v = oldU, oldV
+	f.semiLagrangianVelocity(-dt, forwardU, forwardV, tmpU, tmpV)
 
-	// --- Correction ---
-	for i := range f.u {
-		f.newU[i] = f.newU[i] + 0.5*(f.u[i]-tmpU[i])
-		f.newV[i] = f.newV[i] + 0.5*(f.v[i]-tmpV[i])
-	}
+	// BFECC correction: forward + 0.5 * (original - backward)
+	n := f.NumY
+	parallelRange(1, f.NumX-1, func(i int) {
+		for j := 1; j < f.NumY-1; j++ {
+			if f.s[i*n+j] != 0.0 {
+				idx := i*n + j
+				f.newU[idx] = forwardU[idx] + 0.5*(f.u[idx]-tmpU[idx])
+				f.newV[idx] = forwardV[idx] + 0.5*(f.v[idx]-tmpV[idx])
+			}
+		}
+	})
 
-	// Apply corrected velocities.
+	// Apply the corrected velocities
 	f.copyBorder(f.newU, f.newU)
 	f.copyBorder(f.newV, f.newV)
 	copy(f.u, f.newU)
 	copy(f.v, f.newV)
 }
 
-// semiLagrangianVelocity performs a single semi-Lagrangian advection of the
-// velocity field from srcU/srcV into dstU/dstV using the provided time step.
-// It is used by advectVelocity to perform both the forward and reverse passes.
+// advectSmokeBFECC uses BFECC for smoke advection with clamping to prevent oscillations
+func (f *Fluid) advectSmokeBFECC(dt float32) {
+	// Forward advection
+	forward := make([]float32, f.numCells)
+	f.semiLagrangianSmoke(dt, f.m, forward)
+
+	// Reverse advection
+	backward := make([]float32, f.numCells)
+	f.semiLagrangianSmoke(-dt, forward, backward)
+
+	// BFECC correction with clamping to local extrema
+	n := f.NumY
+	parallelRange(1, f.NumX-1, func(i int) {
+		for j := 1; j < f.NumY-1; j++ {
+			if f.s[i*n+j] != 0.0 {
+				idx := i*n + j
+				corrected := forward[idx] + 0.5*(f.m[idx]-backward[idx])
+
+				// Clamp to local min/max to prevent oscillations
+				minVal := f.m[idx]
+				maxVal := f.m[idx]
+				neighbors := []int{(i-1)*n + j, (i+1)*n + j, i*n + j - 1, i*n + j + 1}
+				for _, nIdx := range neighbors {
+					if f.m[nIdx] < minVal {
+						minVal = f.m[nIdx]
+					}
+					if f.m[nIdx] > maxVal {
+						maxVal = f.m[nIdx]
+					}
+				}
+
+				if corrected < minVal {
+					corrected = minVal
+				}
+				if corrected > maxVal {
+					corrected = maxVal
+				}
+
+				f.newM[idx] = corrected
+			}
+		}
+	})
+
+	f.copyBorder(f.newM, f.newM)
+	copy(f.m, f.newM)
+}
+
+// Update semiLagrangianVelocity to work with explicit source arrays
 func (f *Fluid) semiLagrangianVelocity(dt float32, srcU, srcV, dstU, dstV []float32) {
 	f.copyBorder(dstU, srcU)
 	f.copyBorder(dstV, srcV)
@@ -227,8 +223,7 @@ func (f *Fluid) semiLagrangianVelocity(dt float32, srcU, srcV, dstU, dstV []floa
 
 				x = x - dt*u
 				y = y - dt*v
-				// sampling uses the temporarily assigned f.u/f.v
-				dstU[i*n+j] = f.sampleField(x, y, fieldU)
+				dstU[i*n+j] = f.sampleFieldFrom(x, y, srcU, fieldU)
 			}
 
 			// v component
@@ -240,7 +235,7 @@ func (f *Fluid) semiLagrangianVelocity(dt float32, srcU, srcV, dstU, dstV []floa
 
 				x = x - dt*u
 				y = y - dt*v
-				dstV[i*n+j] = f.sampleField(x, y, fieldV)
+				dstV[i*n+j] = f.sampleFieldFrom(x, y, srcV, fieldV)
 			}
 		}
 	})
@@ -320,6 +315,46 @@ func (f *Fluid) sampleField(x, y float32, fld field) float32 {
 		tx*sy*fieldToSample[x1*n+y0] +
 		tx*ty*fieldToSample[x1*n+y1] +
 		sx*ty*fieldToSample[x0*n+y1]
+
+	return val
+}
+
+// Add a new sampling method that uses explicit source arrays
+func (f *Fluid) sampleFieldFrom(x, y float32, src []float32, fld field) float32 {
+	n := f.NumY
+	h := f.h
+	h1 := float32(1.0 / h)
+	h2 := float32(0.5 * h)
+
+	x = max(min(x, float32(f.NumX)*h), h)
+	y = max(min(y, float32(f.NumY)*h), h)
+
+	dx, dy := float32(0.0), float32(0.0)
+
+	switch fld {
+	case fieldU:
+		dy = h2
+	case fieldV:
+		dx = h2
+	case fieldM:
+		dx, dy = h2, h2
+	}
+
+	x0 := min(int(math.Floor(float64((x-dx)*h1))), f.NumX-1)
+	tx := ((x - dx) - float32(x0)*h) * h1
+	x1 := min(x0+1, f.NumX-1)
+
+	y0 := min(int(math.Floor(float64((y-dy)*h1))), f.NumY-1)
+	ty := ((y - dy) - float32(y0)*h) * h1
+	y1 := min(y0+1, f.NumY-1)
+
+	sx := 1.0 - tx
+	sy := 1.0 - ty
+
+	val := sx*sy*src[x0*n+y0] +
+		tx*sy*src[x1*n+y0] +
+		tx*ty*src[x1*n+y1] +
+		sx*ty*src[x0*n+y1]
 
 	return val
 }

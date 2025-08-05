@@ -196,7 +196,7 @@ func (g *Game) Update() error {
 
 	dt := float32(1.0/120.0) * g.speed
 	if !g.paused {
-		g.fluid.Simulate(dt, 20)
+		g.fluid.Simulate(dt)
 	}
 	return nil
 }
