@@ -21,11 +21,16 @@ type Fluid struct {
 
 	// Strength of the vorticity confinement force. Set to 0 to disable.
 	Confinement float32
+
+	// Friction coefficients - critical for realistic behavior
+	VelocityFrictionA float32 // quadratic term (v^2)
+	VelocityFrictionB float32 // linear term (v)
+	VelocityFrictionC float32 // constant term
 }
 
 func New(density float32, width, height int, h float32) *Fluid {
 	numCells := (width + 2) * (height + 2)
-	return &Fluid{
+	f := &Fluid{
 		density: density,
 		h:       h,
 
@@ -41,29 +46,121 @@ func New(density float32, width, height int, h float32) *Fluid {
 		m:           make([]float32, numCells),
 		newM:        make([]float32, numCells),
 		Confinement: 0,
+
+		// Set realistic friction coefficients based on the C++ implementation
+		VelocityFrictionA: 0.1,  // quadratic friction - causes turbulence breakup
+		VelocityFrictionB: 0.0,  // linear friction
+		VelocityFrictionC: 0.01, // constant friction - prevents infinite persistence
 	}
+
+	// Initialize the solid field - all cells are fluid (1.0) by default
+	for i := range f.s {
+		f.s[i] = 1.0
+	}
+
+	return f
+}
+
+func (f *Fluid) Simulate(dt float32) {
+	// Apply external forces
+	f.handleGravity(dt)
+	if f.Confinement != 0 {
+		f.applyVorticityConfinement(dt)
+	}
+
+	// Apply velocity friction (if enabled)
+	f.applyVelocityFriction(dt)
+
+	// Advect velocity and smoke
+	f.advectVelocityBFECC(dt)
+	f.advectSmokeBFECC(dt)
+
+	// Project velocity to enforce incompressibility
+	f.project() // This computes pressure temporarily
+
+	// Handle boundary conditions
+	f.handleBorders()
+}
+
+// Standard pressure projection - pressure is just a mathematical tool
+func (f *Fluid) project() {
+	n := f.NumY
+	h := f.h
+
+	// Clear pressure field
+	fill(f.p, 0.0)
+
+	// Compute divergence and solve for pressure correction
+	parallelRange(1, f.NumX-1, func(i int) {
+		for j := 1; j < f.NumY-1; j++ {
+			if f.s[i*n+j] != 0.0 {
+				// Compute divergence
+				div := (f.u[(i+1)*n+j] - f.u[i*n+j] +
+					f.v[i*n+j+1] - f.v[i*n+j]) / h
+				f.p[i*n+j] = -div * 0.25 // Simple approximation
+			}
+		}
+	})
+
+	// Apply pressure correction to velocities
+	parallelRange(1, f.NumX-1, func(i int) {
+		for j := 1; j < f.NumY-1; j++ {
+			if i < f.NumX-1 && f.s[i*n+j] != 0.0 && f.s[(i+1)*n+j] != 0.0 {
+				f.u[(i+1)*n+j] -= (f.p[(i+1)*n+j] - f.p[i*n+j]) / h
+			}
+			if j < f.NumY-1 && f.s[i*n+j] != 0.0 && f.s[i*n+j+1] != 0.0 {
+				f.v[i*n+j+1] -= (f.p[i*n+j+1] - f.p[i*n+j]) / h
+			}
+		}
+	})
+}
+
+// applyVelocityFriction applies quadratic friction to velocity
+// This is essential for realistic fluid behavior and stability
+// Formula: friction = dt * (a*v^2 + b*v + c)
+func (f *Fluid) applyVelocityFriction(dt float32) {
+	n := f.NumY
+	parallelRange(0, f.NumX, func(i int) {
+		for j := 0; j < f.NumY; j++ {
+			if f.s[i*n+j] != 0.0 { // only apply to fluid cells
+				idx := i*n + j
+				u := f.u[idx]
+				v := f.v[idx]
+
+				// Calculate velocity magnitude
+				vel := float32(math.Sqrt(float64(u*u + v*v)))
+
+				if vel > 0.001 { // avoid division by zero
+					// Calculate friction force
+					friction := dt * (f.VelocityFrictionA*vel*vel +
+						f.VelocityFrictionB*vel +
+						f.VelocityFrictionC)
+
+					// Apply friction as a multiplier (1.0 = no friction, 0.0 = complete stop)
+					factor := 1.0 - friction
+					if factor < 0 {
+						factor = 0
+					}
+
+					f.u[idx] *= factor
+					f.v[idx] *= factor
+				}
+			}
+		}
+	})
+}
+
+// SetFrictionCoefficients allows tuning the friction behavior
+func (f *Fluid) SetFrictionCoefficients(a, b, c float32) {
+	f.VelocityFrictionA = a
+	f.VelocityFrictionB = b
+	f.VelocityFrictionC = c
 }
 
 func fill[T any](slice []T, val T) {
 	for i := range slice {
 		slice[i] = val
 	}
-}
-
-func (f *Fluid) Simulate(dt float32) {
-	// Apply external forces.
-	f.handleGravity(dt)
-	if f.Confinement != 0 {
-		f.applyVorticityConfinement(dt)
-	}
-
-	// Use BFECC advection for both velocity and smoke
-	// This eliminates the need for the incompressibility solve
-	f.advectVelocityBFECC(dt)
-	f.advectSmokeBFECC(dt)
-
-	// Only handle boundary conditions - no pressure solve needed
-	f.handleBorders()
 }
 
 func (f *Fluid) handleGravity(dt float32) {
@@ -148,9 +245,10 @@ func (f *Fluid) advectVelocityBFECC(dt float32) {
 		}
 	})
 
+	f.copyBorder(f.newU, f.u) // Copy u border to newU
+	f.copyBorder(f.newV, f.v) // Copy v border to newV
+
 	// Apply the corrected velocities
-	f.copyBorder(f.newU, f.newU)
-	f.copyBorder(f.newV, f.newV)
 	copy(f.u, f.newU)
 	copy(f.v, f.newV)
 }

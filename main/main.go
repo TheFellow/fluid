@@ -12,6 +12,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
 const (
@@ -186,7 +187,7 @@ func (g *Game) Update() error {
 	}
 
 	if g.jet {
-		x, y := 4.0, 0.0
+		x, y := 0.5, 0.0 // Much lower jet velocity - was 4.0!
 		size := 100
 		for j := fluidHeight/2 - size; j < fluidHeight/2+size; j++ {
 			g.fluid.SetVelocity(1, j, float32(x), float32(y))
@@ -203,10 +204,20 @@ func (g *Game) Update() error {
 
 var drawOpts = &ebiten.DrawImageOptions{Filter: ebiten.FilterLinear}
 
+var iter int
+
 func (g *Game) Draw(screen *ebiten.Image) {
+	iter++
+	if iter == 120 {
+		iter = 0
+	}
 
 	if !g.showSmoke {
 		pressures := g.fluid.Pressure()
+		if iter == 0 {
+			fmt.Printf("Pressure range: %0.2f - %0.2f\n", pressures.MinValue, pressures.MaxValue)
+		}
+
 		parallelRange(0, pressures.NumX, func(i int) {
 			for j := 0; j < pressures.NumY; j++ {
 				p, err := pressures.Value(i, pressures.NumY-j-1)
@@ -225,6 +236,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	if g.showSmoke {
 		smoke := g.fluid.Smoke()
+		if iter == 0 {
+			fmt.Printf("Smoke range: %0.2f - %0.2f\n", smoke.MinValue, smoke.MaxValue)
+		}
 
 		parallelRange(0, smoke.NumX, func(i int) {
 			for j := 0; j < smoke.NumY; j++ {
@@ -255,7 +269,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	})
 
 	// render
-	g.eImage.ReplacePixels(g.image.Pix)
+	g.eImage.WritePixels(g.image.Pix)
 	screen.DrawImage(g.eImage, drawOpts)
 	if g.showArrows {
 		vel := g.fluid.Velocity()
@@ -268,7 +282,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 				y1 := float64(g.fluid.NumY - j - 1)
 				x2 := x1 + float64(u)*scale
 				y2 := y1 - float64(v)*scale
-				ebitenutil.DrawLine(screen, x1, y1, x2, y2, color.RGBA{0, 0, 0, 128})
+				vector.StrokeLine(screen, float32(x1), float32(y1), float32(x2), float32(y2), 1, color.RGBA{0, 0, 0, 128}, false)
 			}
 		}
 	}
