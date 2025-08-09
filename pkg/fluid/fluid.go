@@ -212,28 +212,41 @@ func (f *Fluid) semiLagrangianVelocity(src_u, src_v, dst_u, dst_v []float32, dt 
 func (f *Fluid) advectVelocity(dt float32) {
 	// Step 1: Forward advection U -> tempU, V -> tempV
 	f.semiLagrangianVelocity(f.U, f.V, f.tempU, f.tempV, dt)
+	f.handleBorders() // Ensure boundaries are consistent
 
 	// Step 2: Backward advection tempU -> newU, tempV -> newV
 	f.semiLagrangianVelocity(f.tempU, f.tempV, f.newU, f.newV, -dt)
+	f.handleBorders() // Ensure boundaries are consistent
 
 	// Step 3: Compute error and apply correction
 	n := f.NumY
 	parallelRange(1, f.NumX-1, func(i int) {
 		for j := 1; j < f.NumY-1; j++ {
 			if f.S[i*n+j] != 0.0 {
-				// Error estimation
-				errorU := (f.U[i*n+j] - f.newU[i*n+j]) * 0.5
-				errorV := (f.V[i*n+j] - f.newV[i*n+j]) * 0.5
+				// Error estimation with clamping to prevent explosion
+				errorU := (f.U[i*n+j] - f.newU[i*n+j]) * 0.4 // Reduced from 0.5 for stability
+				errorV := (f.V[i*n+j] - f.newV[i*n+j]) * 0.4
+
+				// Clamp error to prevent excessive corrections
+				maxError := float32(10.0)
+				errorU = max(min(errorU, maxError), -maxError)
+				errorV = max(min(errorV, maxError), -maxError)
 
 				// Apply error correction to forward result
-				f.newU[i*n+j] = f.tempU[i*n+j] + errorU
-				f.newV[i*n+j] = f.tempV[i*n+j] + errorV
+				correctedU := f.tempU[i*n+j] + errorU
+				correctedV := f.tempV[i*n+j] + errorV
+
+				// Final stability clamp
+				maxVel := float32(100.0)
+				f.newU[i*n+j] = max(min(correctedU, maxVel), -maxVel)
+				f.newV[i*n+j] = max(min(correctedV, maxVel), -maxVel)
 			}
 		}
 	})
 
 	copy(f.U, f.newU)
 	copy(f.V, f.newV)
+	f.handleBorders() // Final boundary enforcement
 }
 
 func (f *Fluid) avgUFromField(field []float32, i, j int) float32 {
@@ -375,11 +388,12 @@ func (f *Fluid) advectSmoke(dt float32) {
 	parallelRange(1, f.NumX-1, func(i int) {
 		for j := 1; j < f.NumY-1; j++ {
 			if f.S[i*n+j] != 0.0 {
-				// Error estimation
-				errorM := (f.M[i*n+j] - f.newM[i*n+j]) * 0.5
+				// Error estimation with stability limits
+				errorM := (f.M[i*n+j] - f.newM[i*n+j]) * 0.4
 
-				// Apply error correction to forward result
-				f.newM[i*n+j] = f.tempM[i*n+j] + errorM
+				// Apply error correction with clamping
+				correctedM := f.tempM[i*n+j] + errorM
+				f.newM[i*n+j] = max(correctedM, 0.0) // Smoke density can't be negative
 			}
 		}
 	})
