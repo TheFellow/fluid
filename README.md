@@ -3,7 +3,6 @@
 Keyboard controls:
 - `S`: Toggle between smoke and pressure rendering.
 - `J`: Enable or disable the jet.
-- `G`: Turn gravity on or off.
 - `V`: Toggle vorticity confinement.
 - `A`: Toggle velocity arrow overlay.
 - `Space`: Pause or resume the simulation.

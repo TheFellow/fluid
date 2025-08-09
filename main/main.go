@@ -12,6 +12,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
 const (
@@ -189,7 +190,7 @@ func (g *Game) Update() error {
 
 	dt := float32(1.0/120.0) * g.speed
 	if !g.paused {
-		g.fluid.Simulate(dt, 20)
+		g.fluid.Simulate(dt)
 	}
 	return nil
 }
@@ -248,20 +249,20 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	})
 
 	// render
-	g.eImage.ReplacePixels(g.image.Pix)
+	g.eImage.WritePixels(g.image.Pix)
 	screen.DrawImage(g.eImage, drawOpts)
 	if g.showArrows {
 		vel := g.fluid.Velocity()
 		step := 10
-		scale := float64(10)
+		scale := float32(10)
 		for i := 1; i < vel.NumX-1; i += step {
 			for j := 1; j < vel.NumY-1; j += step {
 				u, v, _ := vel.Value(i, j)
-				x1 := float64(i)
-				y1 := float64(g.fluid.NumY - j - 1)
-				x2 := x1 + float64(u)*scale
-				y2 := y1 - float64(v)*scale
-				ebitenutil.DrawLine(screen, x1, y1, x2, y2, color.RGBA{0, 0, 0, 128})
+				x1 := float32(i)
+				y1 := float32(g.fluid.NumY - j - 1)
+				x2 := x1 + float32(u)*scale
+				y2 := y1 - float32(v)*scale
+				vector.StrokeLine(screen, x1, y1, x2, y2, 1, color.RGBA{A: 128}, false)
 			}
 		}
 	}
