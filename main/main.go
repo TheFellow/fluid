@@ -111,13 +111,6 @@ func (g *Game) Update() error {
 	if inpututil.IsKeyJustPressed(ebiten.KeyJ) {
 		g.jet = !g.jet
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyG) {
-		if g.fluid.Gravity != 0.0 {
-			g.fluid.SetGravity(false)
-		} else {
-			g.fluid.SetGravity(true)
-		}
-	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyV) {
 		if g.fluid.Confinement != 0 {
 			g.fluid.Confinement = 0
