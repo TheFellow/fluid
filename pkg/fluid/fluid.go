@@ -24,8 +24,6 @@ type Fluid struct {
 
 	// Strength of the vorticity confinement force. Set to 0 to disable.
 	Confinement float32
-	// Gravity acceleration (negative for downward)
-	Gravity float32
 }
 
 func New(density float32, width, height int, h float32) *Fluid {

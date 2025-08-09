@@ -82,14 +82,6 @@ func (f *Fluid) AddSmoke(i, j int, smoke float32) {
 	f.M[cell] += smoke
 }
 
-func (f *Fluid) SetGravity(on bool) {
-	if on {
-		f.Gravity = -9.81
-	} else {
-		f.Gravity = 0.0
-	}
-}
-
 func (f *Fluid) Reset() {
 	fill(f.U, 0.0)
 	fill(f.V, 0.0)
