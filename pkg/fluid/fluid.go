@@ -61,7 +61,8 @@ func fill[T any](slice []T, val T) {
 // Recommended number of pressure iterations for good quality with BFECC
 const RecommendedPressureIterations = uint(8)
 
-func (f *Fluid) Simulate(dt float32, numIters uint) {
+func (f *Fluid) Simulate(dt float32) {
+	numIters := uint(20)
 	fill(f.p, 0)
 	f.makeIncompressible(numIters, dt)
 	if f.Confinement != 0 {
@@ -70,11 +71,6 @@ func (f *Fluid) Simulate(dt float32, numIters uint) {
 	f.handleBorders()
 	f.advectVelocity(dt)
 	f.advectSmoke(dt)
-}
-
-// SimulateOptimized runs the simulation with recommended settings for best quality/performance balance
-func (f *Fluid) SimulateOptimized(dt float32) {
-	f.Simulate(dt, RecommendedPressureIterations)
 }
 
 func (f *Fluid) makeIncompressible(numIters uint, dt float32) {
