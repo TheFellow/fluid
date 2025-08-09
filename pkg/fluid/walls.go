@@ -87,7 +87,10 @@ func (f *Fluid) Reset() {
 	fill(f.V, 0.0)
 	fill(f.newU, 0.0)
 	fill(f.newV, 0.0)
+	fill(f.tempU, 0.0)
+	fill(f.tempV, 0.0)
 	fill(f.p, 0.0)
 	fill(f.M, 0.0)
 	fill(f.newM, 0.0)
+	fill(f.tempM, 0.0)
 }
