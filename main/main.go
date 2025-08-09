@@ -111,13 +111,6 @@ func (g *Game) Update() error {
 	if inpututil.IsKeyJustPressed(ebiten.KeyJ) {
 		g.jet = !g.jet
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyG) {
-		if g.fluid.Gravity != 0.0 {
-			g.fluid.SetGravity(false)
-		} else {
-			g.fluid.SetGravity(true)
-		}
-	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyV) {
 		if g.fluid.Confinement != 0 {
 			g.fluid.Confinement = 0
@@ -196,7 +189,7 @@ func (g *Game) Update() error {
 
 	dt := float32(1.0/120.0) * g.speed
 	if !g.paused {
-		g.fluid.Simulate(dt, 20)
+		g.fluid.Simulate(dt)
 	}
 	return nil
 }
@@ -279,8 +272,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	wallInfo := fmt.Sprintf("U:%v D:%v L:%v R:%v",
 		g.wallTop, g.wallBottom, g.wallLeft, g.wallRight)
 	ebitenutil.DebugPrint(screen,
-		fmt.Sprintf("FPS: %0.2f [S]how:%v Speed:%0.2f\n[J]et:%v [G]ravity:%0.2f [V]ort:%v [A]rrows:%v Paused:%v\n%s",
-			ebiten.ActualFPS(), show, g.speed, g.jet, g.fluid.Gravity, g.fluid.Confinement != 0, g.showArrows, g.paused, wallInfo),
+		fmt.Sprintf("FPS: %0.2f [S]how:%v Speed:%0.2f\n[J]et:%v [V]ort:%v [A]rrows:%v Paused:%v\n%s",
+			ebiten.ActualFPS(), show, g.speed, g.jet, g.fluid.Confinement != 0, g.showArrows, g.paused, wallInfo),
 	)
 }
 

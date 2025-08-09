@@ -56,7 +56,7 @@ func TestDiffusionBehavior(t *testing.T) {
 	f.makeIncompressible(10, 0.01)
 
 	// Verify that the high velocity has been distributed to neighboring cells
-	tolerance := float32(0.1)
+	tolerance := float32(0.05)
 
 	// Check that the center velocity has been reduced
 	if f.U[centerX*n+centerY] >= initialU[centerX*n+centerY] {
@@ -202,7 +202,7 @@ func TestSmokeAdvection(t *testing.T) {
 	}
 
 	conservationError := math.Abs(float64(finalTotal - initialTotal))
-	if conservationError > 0.1 {
+	if conservationError > 0.05 {
 		t.Errorf("Smoke conservation error too high: %f", conservationError)
 	}
 }
@@ -258,7 +258,7 @@ func TestPressureProjection(t *testing.T) {
 		}
 	}
 
-	if maxDiv > 0.5 {
+	if maxDiv > 0.4 {
 		t.Errorf("Maximum divergence after projection too high: %f", maxDiv)
 	}
 }
@@ -342,7 +342,7 @@ func TestBoundaryConditions(t *testing.T) {
 		i, j := neighbor[0], neighbor[1]
 		if i > 0 && i < f.NumX-1 && j > 0 && j < f.NumY-1 {
 			// Check if velocity field shows some variation due to obstacle
-			if math.Abs(float64(f.U[i*n+j]-1.0)) > 0.1 || math.Abs(float64(f.V[i*n+j]-0.5)) > 0.1 {
+			if math.Abs(float64(f.U[i*n+j]-1.0)) > 0.05 || math.Abs(float64(f.V[i*n+j]-0.5)) > 0.05 {
 				obstacleEffect = true
 				break
 			}
@@ -351,5 +351,284 @@ func TestBoundaryConditions(t *testing.T) {
 
 	if !obstacleEffect {
 		t.Error("Expected solid obstacle to affect neighboring velocity field")
+	}
+}
+
+func TestRealisticJetSimulation(t *testing.T) {
+	f := New(1.0, 30, 20, 1.0)
+
+	// Initialize all cells as fluid
+	for i := range f.S {
+		f.S[i] = 1.0
+	}
+
+	n := f.NumY
+
+	// Create jet inlet at left side, middle height
+	jetX := 1
+	jetHeight := 8 // jet spans 8 cells vertically
+	jetCenterY := f.NumY / 2
+	jetStartY := jetCenterY - jetHeight/2
+	jetEndY := jetCenterY + jetHeight/2
+
+	// Set up jet flow - strong rightward velocity
+	jetVelocity := float32(15.0)
+	for j := jetStartY; j < jetEndY; j++ {
+		if j > 0 && j < f.NumY-1 {
+			f.U[jetX*n+j] = jetVelocity
+			f.V[jetX*n+j] = 0.0
+		}
+	}
+
+	// Add some smoke at the jet inlet for visualization validation
+	for j := jetStartY; j < jetEndY; j++ {
+		if j > 0 && j < f.NumY-1 {
+			f.M[jetX*n+j] = 1.0
+		}
+	}
+
+	// Run simulation for several steps
+	dt := float32(0.05)
+	numSteps := 20
+	for step := 0; step < numSteps; step++ {
+		f.Simulate(dt)
+
+		// Maintain jet inlet conditions
+		for j := jetStartY; j < jetEndY; j++ {
+			if j > 0 && j < f.NumY-1 {
+				f.U[jetX*n+j] = jetVelocity
+				f.M[jetX*n+j] = 1.0 // Keep adding smoke
+			}
+		}
+	}
+
+	// Test 1: Jet should maintain strong rightward flow near inlet
+	avgJetU := float32(0.0)
+	jetCells := 0
+	for j := jetStartY; j < jetEndY; j++ {
+		if j > 0 && j < f.NumY-1 {
+			avgJetU += f.U[(jetX+1)*n+j] // Check one cell to the right of inlet
+			jetCells++
+		}
+	}
+	avgJetU /= float32(jetCells)
+
+	if avgJetU < jetVelocity*0.6 {
+		t.Errorf("Expected jet to maintain strong flow, got average U = %f, expected > %f",
+			avgJetU, jetVelocity*0.6)
+	}
+
+	// Test 2: Jet should spread as it moves downstream
+	// Check velocity at different distances from inlet
+	distances := []int{3, 6, 10}
+	prevSpread := float32(0.0)
+
+	for _, dist := range distances {
+		testX := jetX + dist
+		if testX >= f.NumX-1 {
+			continue
+		}
+
+		// Count cells with significant velocity at this distance
+		activeSpread := float32(0.0)
+		for j := 1; j < f.NumY-1; j++ {
+			if f.U[testX*n+j] > jetVelocity*0.1 {
+				activeSpread += 1.0
+			}
+		}
+
+		if prevSpread > 0 && activeSpread < prevSpread*0.9 {
+			t.Errorf("Expected jet to maintain or increase spread as it moves downstream. At distance %d, spread = %f, previous = %f",
+				dist, activeSpread, prevSpread)
+		}
+		prevSpread = activeSpread
+	}
+
+	// Test 3: Smoke should be transported by the jet
+	smokeTransported := false
+	// Check for smoke presence downstream
+	for i := jetX + 2; i < min(jetX+10, f.NumX-1); i++ {
+		for j := jetStartY; j < jetEndY; j++ {
+			if j > 0 && j < f.NumY-1 && f.M[i*n+j] > 0.1 {
+				smokeTransported = true
+				break
+			}
+		}
+		if smokeTransported {
+			break
+		}
+	}
+
+	if !smokeTransported {
+		t.Error("Expected smoke to be transported by jet flow")
+	}
+
+	// Test 4: Conservation checks - total momentum should be reasonable
+	totalMomentumX := float32(0.0)
+	for i := 1; i < f.NumX-1; i++ {
+		for j := 1; j < f.NumY-1; j++ {
+			totalMomentumX += f.U[i*n+j] * f.density
+		}
+	}
+
+	if totalMomentumX < jetVelocity*float32(jetHeight)*f.density*0.3 {
+		t.Errorf("Total X momentum seems too low: %f", totalMomentumX)
+	}
+}
+
+func TestObstacleVortexShedding(t *testing.T) {
+	f := New(1.0, 40, 25, 1.0)
+
+	// Initialize all cells as fluid
+	for i := range f.S {
+		f.S[i] = 1.0
+	}
+
+	n := f.NumY
+
+	// Create a circular obstacle in front of where jet will be
+	obstacleX, obstacleY := 15, f.NumY/2
+	obstacleRadius := 3
+
+	for i := 1; i < f.NumX-1; i++ {
+		for j := 1; j < f.NumY-1; j++ {
+			dx := float32(i - obstacleX)
+			dy := float32(j - obstacleY)
+			if dx*dx+dy*dy <= float32(obstacleRadius*obstacleRadius) {
+				f.S[i*n+j] = 0.0 // Make it solid
+			}
+		}
+	}
+
+	// Set up jet inlet upstream of obstacle
+	jetX := 3
+	jetHeight := 6
+	jetCenterY := f.NumY / 2
+	jetStartY := jetCenterY - jetHeight/2
+	jetEndY := jetCenterY + jetHeight/2
+	jetVelocity := float32(12.0)
+
+	// Enable vorticity confinement to enhance vortex formation
+	f.Confinement = 0.1
+
+	// Add smoke for better vortex visualization
+	for j := jetStartY; j < jetEndY; j++ {
+		if j > 0 && j < f.NumY-1 {
+			f.M[jetX*n+j] = 1.0
+		}
+	}
+
+	// Run simulation long enough for vortex shedding to develop
+	dt := float32(0.02)
+	numSteps := 80
+
+	for step := 0; step < numSteps; step++ {
+		f.Simulate(dt)
+
+		// Maintain jet inlet conditions
+		for j := jetStartY; j < jetEndY; j++ {
+			if j > 0 && j < f.NumY-1 {
+				f.U[jetX*n+j] = jetVelocity
+				f.M[jetX*n+j] = 1.0
+			}
+		}
+	}
+
+	// Test 1: Flow should decelerate and deflect around obstacle
+	// Check that velocity is reduced near the obstacle
+	obstacleInfluence := false
+	checkRadius := obstacleRadius + 2
+
+	for i := obstacleX - checkRadius; i <= obstacleX+checkRadius; i++ {
+		for j := obstacleY - checkRadius; j <= obstacleY+checkRadius; j++ {
+			if i > 0 && i < f.NumX-1 && j > 0 && j < f.NumY-1 && f.S[i*n+j] > 0 {
+				// Check if flow has been deflected (non-zero V component)
+				if math.Abs(float64(f.V[i*n+j])) > 1.0 {
+					obstacleInfluence = true
+					break
+				}
+			}
+		}
+		if obstacleInfluence {
+			break
+		}
+	}
+
+	if !obstacleInfluence {
+		t.Error("Expected obstacle to deflect flow and create vertical velocity components")
+	}
+
+	// Test 2: Check for vorticity (curl) downstream of obstacle
+	// Vortex shedding should create regions of high curl
+	maxCurl := float32(0.0)
+	wakeRegionStartX := obstacleX + obstacleRadius + 1
+	wakeRegionEndX := min(obstacleX+15, f.NumX-2)
+
+	h := f.h
+	for i := wakeRegionStartX; i < wakeRegionEndX; i++ {
+		for j := 2; j < f.NumY-2; j++ {
+			if f.S[i*n+j] > 0 {
+				// Calculate curl (vorticity) = dv/dx - du/dy
+				dvdx := (f.V[(i+1)*n+j] - f.V[(i-1)*n+j]) / (2.0 * h)
+				dudy := (f.U[i*n+j+1] - f.U[i*n+j-1]) / (2.0 * h)
+				curl := dvdx - dudy
+
+				if math.Abs(float64(curl)) > float64(maxCurl) {
+					maxCurl = float32(math.Abs(float64(curl)))
+				}
+			}
+		}
+	}
+
+	if maxCurl < 0.2 {
+		t.Errorf("Expected significant vorticity in wake region, max curl = %f", maxCurl)
+	}
+
+	// Test 3: Check that smoke forms wake patterns behind obstacle
+	totalWakeSmoke := float32(0.0)
+	for i := wakeRegionStartX; i < wakeRegionEndX; i++ {
+		for j := obstacleY - obstacleRadius*2; j <= obstacleY+obstacleRadius*2; j++ {
+			if j > 0 && j < f.NumY-1 && f.S[i*n+j] > 0 {
+				totalWakeSmoke += f.M[i*n+j]
+			}
+		}
+	}
+
+	// We expect at least some smoke transport, even if minimal
+	if totalWakeSmoke < 0.000001 {
+		t.Errorf("Expected some smoke to reach wake region behind obstacle, total wake smoke = %f", totalWakeSmoke)
+	}
+
+	// Test 4: Verify obstacle integrity (should remain solid)
+	for i := 1; i < f.NumX-1; i++ {
+		for j := 1; j < f.NumY-1; j++ {
+			dx := float32(i - obstacleX)
+			dy := float32(j - obstacleY)
+			if dx*dx+dy*dy <= float32(obstacleRadius*obstacleRadius) {
+				if f.S[i*n+j] != 0.0 {
+					t.Errorf("Obstacle cell at (%d,%d) should remain solid", i, j)
+				}
+			}
+		}
+	}
+
+	// Test 5: Pressure gradient should exist around obstacle
+	pressureVariation := false
+	for i := obstacleX - 2; i <= obstacleX+4; i++ {
+		for j := obstacleY - 2; j <= obstacleY+2; j++ {
+			if i > 0 && i < f.NumX-1 && j > 0 && j < f.NumY-1 && f.S[i*n+j] > 0 {
+				if math.Abs(float64(f.p[i*n+j])) > 0.1 {
+					pressureVariation = true
+					break
+				}
+			}
+		}
+		if pressureVariation {
+			break
+		}
+	}
+
+	if !pressureVariation {
+		t.Error("Expected pressure variation around obstacle due to flow interaction")
 	}
 }

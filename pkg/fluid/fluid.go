@@ -53,7 +53,8 @@ func fill[T any](slice []T, val T) {
 	}
 }
 
-func (f *Fluid) Simulate(dt float32, numIters uint) {
+func (f *Fluid) Simulate(dt float32) {
+	numIters := uint(20)
 	fill(f.p, 0)
 	f.makeIncompressible(numIters, dt)
 	if f.Confinement != 0 {
