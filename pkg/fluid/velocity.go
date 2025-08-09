@@ -12,7 +12,7 @@ func (f *Fluid) Velocity() VectorField {
 	return VectorField{
 		NumX:    f.NumX,
 		NumY:    f.NumY,
-		valuesU: f.u,
-		valuesV: f.v,
+		valuesU: f.U,
+		valuesV: f.V,
 	}
 }

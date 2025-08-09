@@ -11,20 +11,21 @@ var (
 type Fluid struct {
 	density float32
 	h       float32
-	Gravity float32
 
 	NumX, NumY int
 	numCells   int
-	u, v       []float32 // velocities
+	U, V       []float32 // velocities
 	newU, newV []float32
 	p          []float32
-	s          []float32 // solid (0) or liquid (1)
+	S          []float32 // solid (0) or liquid (1)
 
-	m    []float32 // smoke
+	M    []float32 // smoke
 	newM []float32
 
 	// Strength of the vorticity confinement force. Set to 0 to disable.
 	Confinement float32
+	// Gravity acceleration (negative for downward)
+	Gravity float32
 }
 
 func New(density float32, width, height int, h float32) *Fluid {
@@ -36,13 +37,13 @@ func New(density float32, width, height int, h float32) *Fluid {
 		NumX:        width + 2,  // LR border cells
 		NumY:        height + 2, // TB border cells
 		numCells:    numCells,
-		u:           make([]float32, numCells),
-		v:           make([]float32, numCells),
+		U:           make([]float32, numCells),
+		V:           make([]float32, numCells),
 		newU:        make([]float32, numCells),
 		newV:        make([]float32, numCells),
 		p:           make([]float32, numCells),
-		s:           make([]float32, numCells),
-		m:           make([]float32, numCells),
+		S:           make([]float32, numCells),
+		M:           make([]float32, numCells),
 		newM:        make([]float32, numCells),
 		Confinement: 0,
 	}
@@ -55,7 +56,6 @@ func fill[T any](slice []T, val T) {
 }
 
 func (f *Fluid) Simulate(dt float32, numIters uint) {
-	f.handleGravity(dt)
 	fill(f.p, 0)
 	f.makeIncompressible(numIters, dt)
 	if f.Confinement != 0 {
@@ -66,27 +66,9 @@ func (f *Fluid) Simulate(dt float32, numIters uint) {
 	f.advectSmoke(dt)
 }
 
-func (f *Fluid) handleGravity(dt float32) {
-	if f.Gravity == 0 {
-		return
-	}
-	n := f.NumY
-	parallelRange(0, f.NumX, func(i int) {
-		// Skip the bottom boundary row to avoid out-of-range access when
-		// referencing j-1. Gravity only affects interior interfaces.
-		for j := 1; j < f.NumY; j++ {
-			// Apply gravity only when both the current cell and the
-			// cell below are fluid.
-			if f.s[i*n+j] != 0.0 && f.s[i*n+j-1] != 0.0 {
-				f.v[i*n+j] += f.Gravity * dt
-			}
-		}
-	})
-}
-
 func (f *Fluid) makeIncompressible(numIters uint, dt float32) {
-	f.copyBorder(f.newU, f.u)
-	f.copyBorder(f.newV, f.v)
+	f.copyBorder(f.newU, f.U)
+	f.copyBorder(f.newV, f.V)
 
 	n := f.NumY
 	cp := f.density * float32(f.h) / dt
@@ -97,30 +79,30 @@ func (f *Fluid) makeIncompressible(numIters uint, dt float32) {
 			for j := 1; j < f.NumY-1; j++ {
 
 				// If the cell is solid, nothing to do...
-				if f.s[i*n+j] == 0 {
+				if f.S[i*n+j] == 0 {
 					continue
 				}
 
-				sx0 := f.s[(i-1)*n+j]
-				sx1 := f.s[(i+1)*n+j]
-				sy0 := f.s[i*n+j-1]
-				sy1 := f.s[i*n+j+1]
+				sx0 := f.S[(i-1)*n+j]
+				sx1 := f.S[(i+1)*n+j]
+				sy0 := f.S[i*n+j-1]
+				sy1 := f.S[i*n+j+1]
 				s := sx0 + sx1 + sy0 + sy1
 				if s == 0 { // All adjacent cells are solid, nothing to do...
 					continue
 				}
 
-				div := f.u[(i+1)*n+j] - f.u[i*n+j] +
-					f.v[i*n+j+1] - f.v[i*n+j]
+				div := f.U[(i+1)*n+j] - f.U[i*n+j] +
+					f.V[i*n+j+1] - f.V[i*n+j]
 
 				p := -div / s
 				p *= Relaxation
 				f.p[i*n+j] += cp * p
 
-				f.u[i*n+j] -= sx0 * p
-				f.u[(i+1)*n+j] += sx1 * p
-				f.v[i*n+j] -= sy0 * p
-				f.v[i*n+j+1] += sy1 * p
+				f.U[i*n+j] -= sx0 * p
+				f.U[(i+1)*n+j] += sx1 * p
+				f.V[i*n+j] -= sy0 * p
+				f.V[i*n+j+1] += sy1 * p
 			}
 		}
 	}
@@ -130,33 +112,33 @@ func (f *Fluid) handleBorders() {
 	n := f.NumY
 	parallelRange(0, f.NumX, func(i int) {
 		// Top border (j == 0)
-		if f.s[i*n+0] == 0 || f.s[i*n+1] == 0 {
-			f.u[i*n+0] = 0
+		if f.S[i*n+0] == 0 || f.S[i*n+1] == 0 {
+			f.U[i*n+0] = 0
 		} else {
-			f.u[i*n+0] = f.u[i*n+1]
+			f.U[i*n+0] = f.U[i*n+1]
 		}
 
 		// Bottom border (j == NumY-1)
-		if f.s[i*n+f.NumY-1] == 0 || f.s[i*n+f.NumY-2] == 0 {
-			f.u[i*n+f.NumY-1] = 0
+		if f.S[i*n+f.NumY-1] == 0 || f.S[i*n+f.NumY-2] == 0 {
+			f.U[i*n+f.NumY-1] = 0
 		} else {
-			f.u[i*n+f.NumY-1] = f.u[i*n+f.NumY-2]
+			f.U[i*n+f.NumY-1] = f.U[i*n+f.NumY-2]
 		}
 	})
 
 	parallelRange(0, f.NumY, func(j int) {
 		// Left border (i == 0)
-		if f.s[0*n+j] == 0 || f.s[1*n+j] == 0 {
-			f.v[0*n+j] = 0
+		if f.S[0*n+j] == 0 || f.S[1*n+j] == 0 {
+			f.V[0*n+j] = 0
 		} else {
-			f.v[0*n+j] = f.v[1*n+j]
+			f.V[0*n+j] = f.V[1*n+j]
 		}
 
 		// Right border (i == NumX-1)
-		if f.s[(f.NumX-1)*n+j] == 0 || f.s[(f.NumX-2)*n+j] == 0 {
-			f.v[(f.NumX-1)*n+j] = 0
+		if f.S[(f.NumX-1)*n+j] == 0 || f.S[(f.NumX-2)*n+j] == 0 {
+			f.V[(f.NumX-1)*n+j] = 0
 		} else {
-			f.v[(f.NumX-1)*n+j] = f.v[(f.NumX-2)*n+j]
+			f.V[(f.NumX-1)*n+j] = f.V[(f.NumX-2)*n+j]
 		}
 	})
 }
@@ -164,8 +146,8 @@ func (f *Fluid) handleBorders() {
 func (f *Fluid) advectVelocity(dt float32) {
 	// Preserve boundaries by copying them into the destination slices
 	// before computing the interior advection.
-	f.copyBorder(f.newU, f.u)
-	f.copyBorder(f.newV, f.v)
+	f.copyBorder(f.newU, f.U)
+	f.copyBorder(f.newV, f.V)
 
 	n := f.NumY
 	h := f.h
@@ -175,10 +157,10 @@ func (f *Fluid) advectVelocity(dt float32) {
 		for j := 1; j < f.NumY; j++ {
 
 			// u component
-			if f.s[i*n+j] != 0.0 && f.s[(i-1)*n+j] != 0.0 && j < f.NumY-1 {
+			if f.S[i*n+j] != 0.0 && f.S[(i-1)*n+j] != 0.0 && j < f.NumY-1 {
 				x := float32(i) * h
 				y := float32(j)*h + h2
-				u := f.u[i*n+j]
+				u := f.U[i*n+j]
 				v := f.avgV(i, j)
 
 				x = x - dt*u
@@ -188,11 +170,11 @@ func (f *Fluid) advectVelocity(dt float32) {
 			}
 
 			// v component
-			if f.s[i*n+j] != 0.0 && f.s[i*n+j-1] != 0.0 && i < f.NumX-1 {
+			if f.S[i*n+j] != 0.0 && f.S[i*n+j-1] != 0.0 && i < f.NumX-1 {
 				x := float32(i)*h + h2
 				y := float32(j) * h
 				u := f.avgU(i, j)
-				v := f.v[i*n+j]
+				v := f.V[i*n+j]
 
 				x = x - dt*u
 				y = y - dt*v
@@ -202,21 +184,21 @@ func (f *Fluid) advectVelocity(dt float32) {
 		}
 	})
 
-	copy(f.u, f.newU)
-	copy(f.v, f.newV)
+	copy(f.U, f.newU)
+	copy(f.V, f.newV)
 }
 
 func (f *Fluid) avgU(i, j int) float32 {
 	n := f.NumY
-	u := (f.u[i*n+j-1] + f.u[i*n+j] +
-		f.u[(i+1)*n+j-1] + f.u[(i+1)*n+j]) * 0.25
+	u := (f.U[i*n+j-1] + f.U[i*n+j] +
+		f.U[(i+1)*n+j-1] + f.U[(i+1)*n+j]) * 0.25
 	return u
 }
 
 func (f *Fluid) avgV(i, j int) float32 {
 	n := f.NumY
-	v := (f.v[(i-1)*n+j] + f.v[i*n+j] +
-		f.v[(i-1)*n+j+1] + f.v[i*n+j+1]) * 0.25
+	v := (f.V[(i-1)*n+j] + f.V[i*n+j] +
+		f.V[(i-1)*n+j+1] + f.V[i*n+j+1]) * 0.25
 	return v
 }
 
@@ -242,13 +224,13 @@ func (f *Fluid) sampleField(x, y float32, fld field) float32 {
 	var fieldToSample []float32
 	switch fld {
 	case fieldU:
-		fieldToSample = f.u
+		fieldToSample = f.U
 		dy = h2
 	case fieldV:
-		fieldToSample = f.v
+		fieldToSample = f.V
 		dx = h2
 	case fieldM:
-		fieldToSample = f.m
+		fieldToSample = f.M
 		dx, dy = h2, h2
 	}
 
@@ -273,7 +255,7 @@ func (f *Fluid) sampleField(x, y float32, fld field) float32 {
 
 func (f *Fluid) advectSmoke(dt float32) {
 	// Copy border cells first so advection doesn't alter boundary values.
-	f.copyBorder(f.newM, f.m)
+	f.copyBorder(f.newM, f.M)
 
 	n := f.NumY
 	h := f.h
@@ -282,9 +264,9 @@ func (f *Fluid) advectSmoke(dt float32) {
 	parallelRange(1, f.NumX-1, func(i int) {
 		for j := 1; j < f.NumY-1; j++ {
 
-			if f.s[i*n+j] != 0.0 {
-				var u = (f.u[i*n+j] + f.u[(i+1)*n+j]) * 0.5
-				var v = (f.v[i*n+j] + f.v[i*n+j+1]) * 0.5
+			if f.S[i*n+j] != 0.0 {
+				var u = (f.U[i*n+j] + f.U[(i+1)*n+j]) * 0.5
+				var v = (f.V[i*n+j] + f.V[i*n+j+1]) * 0.5
 				var x = float32(i)*h + h2 - dt*u
 				var y = float32(j)*h + h2 - dt*v
 
@@ -293,7 +275,7 @@ func (f *Fluid) advectSmoke(dt float32) {
 		}
 	})
 
-	copy(f.m, f.newM)
+	copy(f.M, f.newM)
 }
 
 func (f *Fluid) copyBorder(dst, src []float32) {
@@ -319,12 +301,12 @@ func (f *Fluid) applyVorticityConfinement(dt float32) {
 	// compute curl (v_x - u_y)
 	for i := 1; i < f.NumX-1; i++ {
 		for j := 1; j < f.NumY-1; j++ {
-			if f.s[i*n+j] == 0 {
+			if f.S[i*n+j] == 0 {
 				continue
 			}
 
-			dvdx := (f.v[(i+1)*n+j] - f.v[(i-1)*n+j]) * 0.5 / h
-			dudy := (f.u[i*n+j+1] - f.u[i*n+j-1]) * 0.5 / h
+			dvdx := (f.V[(i+1)*n+j] - f.V[(i-1)*n+j]) * 0.5 / h
+			dudy := (f.U[i*n+j+1] - f.U[i*n+j-1]) * 0.5 / h
 			curl[i*n+j] = dvdx - dudy
 		}
 	}
@@ -332,7 +314,7 @@ func (f *Fluid) applyVorticityConfinement(dt float32) {
 	eps := float32(1e-5)
 	for i := 1; i < f.NumX-1; i++ {
 		for j := 1; j < f.NumY-1; j++ {
-			if f.s[i*n+j] == 0 {
+			if f.S[i*n+j] == 0 {
 				continue
 			}
 
@@ -346,8 +328,8 @@ func (f *Fluid) applyVorticityConfinement(dt float32) {
 
 			vort := curl[i*n+j]
 
-			f.u[i*n+j] += f.Confinement * gy * vort * dt
-			f.v[i*n+j] -= f.Confinement * gx * vort * dt
+			f.U[i*n+j] += f.Confinement * gy * vort * dt
+			f.V[i*n+j] -= f.Confinement * gx * vort * dt
 		}
 	}
 

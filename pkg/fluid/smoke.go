@@ -6,11 +6,11 @@ func (f *Fluid) Smoke() ScalarField {
 	minValue := float32(math.MaxFloat32)
 	maxValue := float32(-(math.MaxFloat32 - 1))
 	for i := range f.numCells {
-		if f.m[i] < minValue {
-			minValue = f.m[i]
+		if f.M[i] < minValue {
+			minValue = f.M[i]
 		}
-		if f.m[i] > maxValue {
-			maxValue = f.m[i]
+		if f.M[i] > maxValue {
+			maxValue = f.M[i]
 		}
 	}
 	s := ScalarField{
@@ -18,7 +18,7 @@ func (f *Fluid) Smoke() ScalarField {
 		NumY:     f.NumY,
 		MaxValue: maxValue,
 		MinValue: minValue,
-		values:   f.m,
+		values:   f.M,
 	}
 	return s
 }

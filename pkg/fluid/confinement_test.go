@@ -18,11 +18,11 @@ func TestApplyVorticityConfinement(t *testing.T) {
 
 	f.Confinement = 5
 	idx := 2*f.NumY + 2 // Cell inside the vortex
-	u0 := f.u[idx]
-	v0 := f.v[idx]
+	u0 := f.U[idx]
+	v0 := f.V[idx]
 	f.applyVorticityConfinement(1)
 
-	if f.u[idx] == u0 && f.v[idx] == v0 {
+	if f.U[idx] == u0 && f.V[idx] == v0 {
 		t.Fatal("confinement force did not modify velocities")
 	}
 }
