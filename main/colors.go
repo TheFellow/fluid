@@ -5,6 +5,44 @@ import (
 	"math"
 )
 
+// getDivergingColor maps a value to a blue-white-red diverging colormap.
+// Negative values are blue, zero is white, positive values are red.
+func getDivergingColor(val, minVal, maxVal float32) color.RGBA {
+	// Normalize to [-1, 1] where 0 is the midpoint
+	absMax := float32(math.Max(math.Abs(float64(minVal)), math.Abs(float64(maxVal))))
+	if absMax < 1e-8 {
+		return color.RGBA{R: 255, G: 255, B: 255, A: 255}
+	}
+	t := val / absMax // [-1, 1]
+	if t > 1 {
+		t = 1
+	}
+	if t < -1 {
+		t = -1
+	}
+
+	var r, g, b float32
+	if t >= 0 {
+		// White to red
+		r = 1.0
+		g = 1.0 - t
+		b = 1.0 - t
+	} else {
+		// White to blue
+		a := -t
+		r = 1.0 - a
+		g = 1.0 - a
+		b = 1.0
+	}
+
+	return color.RGBA{
+		R: uint8(255 * r),
+		G: uint8(255 * g),
+		B: uint8(255 * b),
+		A: 0xff,
+	}
+}
+
 func getSciValue(val, minVal, maxVal float32) color.RGBA {
 	val = min(max(val, minVal), maxVal-0.0001)
 	var d = maxVal - minVal

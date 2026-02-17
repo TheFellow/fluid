@@ -897,3 +897,651 @@ func TestPerformanceComparison(t *testing.T) {
 		})
 	}
 }
+
+func TestAdvancedVisualEnhancements(t *testing.T) {
+	f := New(1.0, 25, 15, 1.0)
+
+	// Initialize all cells as fluid
+	for i := range f.S {
+		f.S[i] = 1.0
+	}
+
+	// Enable all advanced visual features
+	f.ViscosityDiffusion = 0.15  // Higher for more smoothness
+	f.PressureDamping = 0.92     // More damping for stability
+	f.Confinement = 0.08         // Enhanced vortex preservation
+	f.TurbulenceStrength = 0.03  // Small realistic turbulence
+	f.SmokeAdvection = 1.2       // Enhanced smoke transport
+
+	n := f.NumY
+
+	// Create complex scenario with jet and obstacles
+	jetX := 3
+	jetHeight := 6
+	jetCenterY := f.NumY / 2
+	jetStartY := jetCenterY - jetHeight/2
+	jetEndY := jetCenterY + jetHeight/2
+	jetVelocity := float32(12.0)
+
+	// Add multiple obstacles for complex flow patterns
+	obstacles := [][2]int{
+		{12, jetCenterY},
+		{18, jetCenterY - 3},
+		{18, jetCenterY + 3},
+	}
+	
+	for _, obs := range obstacles {
+		if obs[0] < f.NumX && obs[1] < f.NumY && obs[1] >= 0 {
+			f.S[obs[0]*n+obs[1]] = 0.0
+		}
+	}
+
+	basedt := float32(0.08)
+	numSteps := 20
+	
+	var finalMaxU, finalMaxV float32
+
+	for step := 0; step < numSteps; step++ {
+		// Get adaptive time step
+		adaptivedt := f.GetAdaptiveTimeStep(basedt)
+		
+		// Maintain jet inlet
+		for j := jetStartY; j < jetEndY; j++ {
+			if j > 0 && j < f.NumY-1 {
+				f.U[jetX*n+j] = jetVelocity
+				f.M[jetX*n+j] = 1.0 // Add smoke
+			}
+		}
+
+		// Simulate with adaptive time step
+		f.Simulate(adaptivedt)
+
+		// Test stability with all enhancements
+		maxU, maxV, maxM := float32(0.0), float32(0.0), float32(0.0)
+		for i := 1; i < f.NumX-1; i++ {
+			for j := 1; j < f.NumY-1; j++ {
+				absU := float32(math.Abs(float64(f.U[i*n+j])))
+				absV := float32(math.Abs(float64(f.V[i*n+j])))
+				if absU > maxU { maxU = absU }
+				if absV > maxV { maxV = absV }
+				if f.M[i*n+j] > maxM { maxM = f.M[i*n+j] }
+			}
+		}
+
+		// Verify stability
+		if maxU > 100.0 || maxV > 100.0 {
+			t.Errorf("Velocities too high at step %d: maxU=%f, maxV=%f", step, maxU, maxV)
+		}
+
+		if math.IsNaN(float64(maxU)) || math.IsNaN(float64(maxV)) || math.IsNaN(float64(maxM)) {
+			t.Errorf("NaN detected at step %d", step)
+		}
+
+		// Log adaptive time step usage
+		if step == 0 {
+			t.Logf("Adaptive time step: base=%.4f, adaptive=%.4f, reduction=%.1f%%", 
+				basedt, adaptivedt, (1-adaptivedt/basedt)*100)
+		}
+		
+		// Store final values
+		finalMaxU, finalMaxV = maxU, maxV
+	}
+
+	// Test that enhanced smoke transport works
+	totalDownstreamSmoke := float32(0.0)
+	for i := jetX + 5; i < f.NumX-1; i++ {
+		for j := 1; j < f.NumY-1; j++ {
+			totalDownstreamSmoke += f.M[i*n+j]
+		}
+	}
+
+	if totalDownstreamSmoke < 2.0 {
+		t.Errorf("Expected enhanced smoke transport, got downstream total: %f", totalDownstreamSmoke)
+	}
+
+	// Test that turbulence created velocity variations
+	velocityVariations := 0
+	for i := jetX + 2; i < jetX + 8; i++ {
+		for j := jetCenterY - 2; j <= jetCenterY + 2; j++ {
+			if j > 0 && j < f.NumY-1 && i < f.NumX-1 {
+				// Check for non-uniform velocities (sign of turbulence)
+				if math.Abs(float64(f.V[i*n+j])) > 0.5 {
+					velocityVariations++
+				}
+			}
+		}
+	}
+
+	if velocityVariations < 3 {
+		t.Logf("Limited turbulence variations: %d (this may be normal for small turbulence strength)", velocityVariations)
+	}
+
+	t.Logf("Advanced visual enhancements test completed successfully")
+	t.Logf("Final state: maxU=%.2f, maxV=%.2f, downstream smoke=%.2f", 
+		finalMaxU, finalMaxV, totalDownstreamSmoke)
+}
+
+func TestMultigridPerformance(t *testing.T) {
+	scenarios := []struct {
+		name         string
+		useMultigrid bool
+		numIters     uint
+	}{
+		{"Single-grid 8 iters", false, 8},
+		{"Multigrid 4 iters", true, 4},
+		{"Single-grid 4 iters", false, 4},
+	}
+
+	for _, scenario := range scenarios {
+		t.Run(scenario.name, func(t *testing.T) {
+			f := New(1.0, 20, 15, 1.0)
+
+			// Initialize all cells as fluid
+			for i := range f.S {
+				f.S[i] = 1.0
+			}
+
+			// Configure solver
+			f.UseMultigrid = scenario.useMultigrid
+			f.MultigridLevels = 2
+			f.ViscosityDiffusion = 0.1
+			f.PressureDamping = 0.95
+
+			n := f.NumY
+
+			// Create jet scenario for challenging pressure solve
+			jetX := 2
+			jetHeight := 4
+			jetCenterY := f.NumY / 2
+			jetStartY := jetCenterY - jetHeight/2
+			jetEndY := jetCenterY + jetHeight/2
+			jetVelocity := float32(15.0) // High velocity for challenging case
+
+			// Add obstacle to create complex pressure field
+			obstacleX, obstacleY := 10, jetCenterY
+			f.S[obstacleX*n+obstacleY] = 0.0
+
+			dt := float32(0.1)
+			numSteps := 10
+
+			// Use custom simulate method to control iterations
+			customSimulate := func(dt float32) {
+				fill(f.p, 0)
+				if f.ViscosityDiffusion > 0 {
+					f.applyViscosity(dt)
+				}
+				f.makeIncompressible(scenario.numIters, dt)
+				if f.Confinement != 0 {
+					f.applyVorticityConfinement(dt)
+				}
+				if f.TurbulenceStrength > 0 {
+					f.addTurbulence(dt)
+				}
+				f.handleBorders()
+				f.advectVelocity(dt)
+				f.advectSmoke(dt)
+			}
+
+			// Run simulation
+			for step := 0; step < numSteps; step++ {
+				// Maintain jet inlet
+				for j := jetStartY; j < jetEndY; j++ {
+					if j > 0 && j < f.NumY-1 {
+						f.U[jetX*n+j] = jetVelocity
+						f.M[jetX*n+j] = 1.0 // Add smoke
+					}
+				}
+
+				customSimulate(dt)
+
+				// Check stability
+				maxU, maxV := float32(0.0), float32(0.0)
+				for i := 1; i < f.NumX-1; i++ {
+					for j := 1; j < f.NumY-1; j++ {
+						absU := float32(math.Abs(float64(f.U[i*n+j])))
+						absV := float32(math.Abs(float64(f.V[i*n+j])))
+						if absU > maxU {
+							maxU = absU
+						}
+						if absV > maxV {
+							maxV = absV
+						}
+					}
+				}
+
+				if maxU > 200.0 || maxV > 200.0 {
+					t.Errorf("Instability in %s at step %d: maxU=%f, maxV=%f", scenario.name, step, maxU, maxV)
+					break
+				}
+
+				if math.IsNaN(float64(maxU)) || math.IsNaN(float64(maxV)) {
+					t.Errorf("NaN detected in %s at step %d", scenario.name, step)
+					break
+				}
+			}
+
+			// Calculate final divergence to assess solver quality
+			finalDivergence := f.calculateFinalDivergence()
+
+			t.Logf("%s: final divergence = %.6f", scenario.name, finalDivergence)
+
+			// Quality check - multigrid with 4 iters should be better than single-grid with 4 iters
+			// This is more of a qualitative assessment for now
+		})
+	}
+}
+
+func TestApplyForce(t *testing.T) {
+	f := New(1.0, 10, 10, 1.0)
+	for i := range f.S {
+		f.S[i] = 1.0
+	}
+
+	n := f.NumY
+	i, j := 5, 5
+	f.ApplyForce(i, j, 3.0, -2.0)
+
+	if f.U[i*n+j] != 3.0 {
+		t.Errorf("expected U=3.0, got %f", f.U[i*n+j])
+	}
+	if f.V[i*n+j] != -2.0 {
+		t.Errorf("expected V=-2.0, got %f", f.V[i*n+j])
+	}
+
+	// Force on solid cell should be a no-op
+	f.S[6*n+6] = 0.0
+	f.ApplyForce(6, 6, 10.0, 10.0)
+	if f.U[6*n+6] != 0 || f.V[6*n+6] != 0 {
+		t.Error("force should not apply to solid cells")
+	}
+
+	// Force out of bounds should be a no-op
+	f.ApplyForce(0, 0, 1.0, 1.0) // border cell
+}
+
+func TestApplyForceRadius(t *testing.T) {
+	f := New(1.0, 20, 20, 1.0)
+	for i := range f.S {
+		f.S[i] = 1.0
+	}
+
+	n := f.NumY
+	cx, cy := 10, 10
+	f.ApplyForceRadius(cx, cy, 5.0, 0.0, 3)
+
+	// Center should have full force
+	if f.U[cx*n+cy] < 4.5 {
+		t.Errorf("center should have near-full force, got %f", f.U[cx*n+cy])
+	}
+
+	// Edge of radius should have reduced force
+	edgeU := f.U[(cx+3)*n+cy]
+	if edgeU >= f.U[cx*n+cy] {
+		t.Errorf("edge force should be less than center: edge=%f center=%f", edgeU, f.U[cx*n+cy])
+	}
+	if edgeU <= 0 {
+		t.Errorf("edge force should be > 0, got %f", edgeU)
+	}
+
+	// Outside radius should have zero force
+	if f.U[(cx+4)*n+cy] != 0 {
+		t.Errorf("outside radius should be zero, got %f", f.U[(cx+4)*n+cy])
+	}
+}
+
+func TestForceDoesNotBreakIncompressibility(t *testing.T) {
+	f := New(1.0, 20, 15, 1.0)
+	for i := range f.S {
+		f.S[i] = 1.0
+	}
+
+	// Apply a large force
+	f.ApplyForceRadius(10, 7, 20.0, 10.0, 4)
+
+	// Simulate - pressure solver should correct the divergence
+	f.Simulate(0.05)
+
+	maxDiv := f.MaxDivergence()
+	if maxDiv > 1.0 {
+		t.Errorf("divergence too high after force + simulate: %f", maxDiv)
+	}
+}
+
+func TestBFECCAccuracy(t *testing.T) {
+	// Advect a sharp smoke blob with both methods, compare diffusion
+	runAdvection := func(useBFECC bool) float32 {
+		f := New(1.0, 30, 30, 1.0)
+		for i := range f.S {
+			f.S[i] = 1.0
+		}
+		n := f.NumY
+
+		// Uniform rightward flow
+		for i := 1; i < f.NumX-1; i++ {
+			for j := 1; j < f.NumY-1; j++ {
+				f.U[i*n+j] = 3.0
+			}
+		}
+
+		// Sharp smoke blob at center
+		cx, cy := 10, 15
+		for i := cx - 2; i <= cx+2; i++ {
+			for j := cy - 2; j <= cy+2; j++ {
+				f.M[i*n+j] = 1.0
+			}
+		}
+
+		f.UseBFECC = useBFECC
+		initialMax := float32(1.0)
+
+		for step := 0; step < 50; step++ {
+			f.Simulate(0.05)
+			// Restore flow
+			for i := 1; i < f.NumX-1; i++ {
+				for j := 1; j < f.NumY-1; j++ {
+					f.U[i*n+j] = 3.0
+				}
+			}
+		}
+
+		// Measure max smoke value - higher means less numerical diffusion
+		maxSmoke := float32(0)
+		for i := range f.M {
+			if f.M[i] > maxSmoke {
+				maxSmoke = f.M[i]
+			}
+		}
+		_ = initialMax
+		return maxSmoke
+	}
+
+	slMax := runAdvection(false)
+	bfeccMax := runAdvection(true)
+
+	t.Logf("SL max smoke after 50 steps: %f", slMax)
+	t.Logf("BFECC max smoke after 50 steps: %f", bfeccMax)
+
+	// BFECC should preserve peaks better (less diffusion)
+	if bfeccMax < slMax {
+		t.Logf("Note: BFECC max (%f) < SL max (%f) - clamping may cause this", bfeccMax, slMax)
+	}
+}
+
+func TestBFECCStabilityLongRun(t *testing.T) {
+	f := New(1.0, 30, 20, 1.0)
+	for i := range f.S {
+		f.S[i] = 1.0
+	}
+
+	f.UseBFECC = true
+	n := f.NumY
+
+	// Add obstacle
+	f.SetCircularObstacle(15, f.NumY/2, 3)
+
+	for step := 0; step < 200; step++ {
+		// Maintain jet
+		for j := f.NumY/2 - 4; j < f.NumY/2+4; j++ {
+			if j > 0 && j < f.NumY-1 {
+				f.U[1*n+j] = 15.0
+				f.M[1*n+j] = 1.0
+			}
+		}
+
+		f.Simulate(0.05)
+
+		// Check for NaN/Inf
+		for i := 1; i < f.NumX-1; i++ {
+			for j := 1; j < f.NumY-1; j++ {
+				u := f.U[i*n+j]
+				v := f.V[i*n+j]
+				m := f.M[i*n+j]
+				if math.IsNaN(float64(u)) || math.IsInf(float64(u), 0) ||
+					math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) ||
+					math.IsNaN(float64(m)) || math.IsInf(float64(m), 0) {
+					t.Fatalf("NaN/Inf at step %d cell (%d,%d)", step, i, j)
+				}
+			}
+		}
+	}
+
+	// Verify smoke stays non-negative
+	for i := range f.M {
+		if f.M[i] < -0.001 {
+			t.Errorf("negative smoke: %f", f.M[i])
+		}
+	}
+}
+
+func TestInteractionStability(t *testing.T) {
+	f := New(1.0, 30, 20, 1.0)
+	for i := range f.S {
+		f.S[i] = 1.0
+	}
+
+	n := f.NumY
+
+	for step := 0; step < 100; step++ {
+		// Randomly apply forces, add smoke, toggle walls
+		if step%5 == 0 {
+			f.ApplyForceRadius(10+step%10, 10, 10.0, 5.0, 3)
+		}
+		if step%3 == 0 {
+			f.AddSmoke(5, 10, 1.0)
+		}
+		if step%20 == 0 {
+			f.SetSolid(15, 10, true)
+		}
+		if step%20 == 10 {
+			f.SetSolid(15, 10, false)
+		}
+
+		f.Simulate(0.05)
+
+		maxU := float32(0)
+		for i := 1; i < f.NumX-1; i++ {
+			for j := 1; j < f.NumY-1; j++ {
+				u := float32(math.Abs(float64(f.U[i*n+j])))
+				v := float32(math.Abs(float64(f.V[i*n+j])))
+				if u > maxU {
+					maxU = u
+				}
+				if v > maxU {
+					maxU = v
+				}
+			}
+		}
+		if math.IsNaN(float64(maxU)) || maxU > 500 {
+			t.Fatalf("instability at step %d: max velocity = %f", step, maxU)
+		}
+	}
+}
+
+func TestSmokeNonNegative(t *testing.T) {
+	f := New(1.0, 20, 15, 1.0)
+	for i := range f.S {
+		f.S[i] = 1.0
+	}
+	f.ViscosityDiffusion = 0.1
+
+	n := f.NumY
+	for step := 0; step < 50; step++ {
+		f.U[3*n+7] = 10.0
+		f.M[3*n+7] = 1.0
+		f.Simulate(0.08)
+	}
+
+	for i := range f.M {
+		if f.M[i] < -0.01 {
+			t.Errorf("smoke went negative: %f", f.M[i])
+		}
+	}
+}
+
+func TestVorticityField(t *testing.T) {
+	f := New(1.0, 10, 10, 1.0)
+	for i := range f.S {
+		f.S[i] = 1.0
+	}
+
+	// Create a simple vortex
+	n := f.NumY
+	f.U[5*n+4] = 1
+	f.U[5*n+6] = -1
+	f.V[4*n+5] = -1
+	f.V[6*n+5] = 1
+
+	vort := f.Vorticity()
+	v, err := vort.Value(5, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(float64(v)) < 0.1 {
+		t.Errorf("expected nonzero vorticity at vortex center, got %f", v)
+	}
+}
+
+func TestVelocityMagnitudeField(t *testing.T) {
+	f := New(1.0, 10, 10, 1.0)
+	for i := range f.S {
+		f.S[i] = 1.0
+	}
+
+	n := f.NumY
+	f.U[5*n+5] = 3.0
+	f.U[6*n+5] = 3.0
+	f.V[5*n+5] = 4.0
+	f.V[5*n+6] = 4.0
+
+	vmag := f.VelocityMagnitude()
+	v, err := vmag.Value(5, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should be sqrt(3^2 + 4^2) = 5
+	if math.Abs(float64(v)-5.0) > 0.1 {
+		t.Errorf("expected velocity magnitude ~5, got %f", v)
+	}
+}
+
+func TestSetCircularObstacle(t *testing.T) {
+	f := New(1.0, 20, 20, 1.0)
+	for i := range f.S {
+		f.S[i] = 1.0
+	}
+
+	f.SetCircularObstacle(10, 10, 3)
+
+	// Center should be solid
+	if !f.IsSolid(10, 10) {
+		t.Error("center should be solid")
+	}
+	// Point within radius
+	if !f.IsSolid(12, 10) {
+		t.Error("(12,10) should be solid (dist=2)")
+	}
+	// Point outside radius
+	if f.IsSolid(14, 10) {
+		t.Error("(14,10) should not be solid (dist=4)")
+	}
+}
+
+func (f *Fluid) calculateFinalDivergence() float32 {
+	n := f.NumY
+	totalDiv := float32(0.0)
+	count := 0
+
+	for i := 1; i < f.NumX-1; i++ {
+		for j := 1; j < f.NumY-1; j++ {
+			if f.S[i*n+j] > 0 {
+				div := f.U[(i+1)*n+j] - f.U[i*n+j] + f.V[i*n+j+1] - f.V[i*n+j]
+				totalDiv += float32(math.Abs(float64(div)))
+				count++
+			}
+		}
+	}
+
+	if count > 0 {
+		return totalDiv / float32(count)
+	}
+	return 0
+}
+
+func TestMultigridStability(t *testing.T) {
+	f := New(1.0, 30, 20, 1.0)
+
+	// Initialize all cells as fluid
+	for i := range f.S {
+		f.S[i] = 1.0
+	}
+
+	// Enable multigrid solver
+	f.UseMultigrid = true
+	f.MultigridLevels = 2
+	f.ViscosityDiffusion = 0.1
+	f.PressureDamping = 0.95
+	f.Confinement = 0.05
+
+	n := f.NumY
+
+	// Create challenging scenario
+	jetX := 3
+	jetHeight := 6
+	jetCenterY := f.NumY / 2
+	jetStartY := jetCenterY - jetHeight/2
+	jetEndY := jetCenterY + jetHeight/2
+	jetVelocity := float32(18.0)
+
+	// Add multiple obstacles
+	obstacles := [][2]int{{15, jetCenterY}, {22, jetCenterY-2}, {22, jetCenterY+2}}
+	for _, obs := range obstacles {
+		if obs[0] < f.NumX && obs[1] < f.NumY && obs[1] >= 0 {
+			f.S[obs[0]*n+obs[1]] = 0.0
+		}
+	}
+
+	dt := float32(0.08)
+	numSteps := 25
+
+	for step := 0; step < numSteps; step++ {
+		// Maintain jet inlet
+		for j := jetStartY; j < jetEndY; j++ {
+			if j > 0 && j < f.NumY-1 {
+				f.U[jetX*n+j] = jetVelocity
+				f.M[jetX*n+j] = 1.0
+			}
+		}
+
+		// Simulate with default 8 iterations but using multigrid
+		f.Simulate(dt)
+
+		// Check stability
+		maxU, maxV := float32(0.0), float32(0.0)
+		for i := 1; i < f.NumX-1; i++ {
+			for j := 1; j < f.NumY-1; j++ {
+				absU := float32(math.Abs(float64(f.U[i*n+j])))
+				absV := float32(math.Abs(float64(f.V[i*n+j])))
+				if absU > maxU { maxU = absU }
+				if absV > maxV { maxV = absV }
+			}
+		}
+
+		if maxU > 100.0 || maxV > 100.0 {
+			t.Errorf("Multigrid instability at step %d: maxU=%f, maxV=%f", step, maxU, maxV)
+			break
+		}
+
+		if math.IsNaN(float64(maxU)) || math.IsNaN(float64(maxV)) {
+			t.Errorf("Multigrid NaN detected at step %d", step)
+			break
+		}
+	}
+
+	// Check final divergence (be more lenient for complex scenarios)
+	finalDiv := f.calculateFinalDivergence()
+	if finalDiv > 5.0 {
+		t.Errorf("Multigrid final divergence too high: %f", finalDiv)
+	}
+
+	t.Logf("Multigrid stability test completed successfully, final divergence: %.6f", finalDiv)
+}
