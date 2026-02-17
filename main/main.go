@@ -763,7 +763,6 @@ func (g *Game) resetToPreset() {
 		g.wallBottom = true
 		g.wallLeft = true
 		g.wallRight = false
-		g.jet = true
 
 	case PresetCavity:
 		g.wallTop = true
@@ -784,7 +783,6 @@ func (g *Game) resetToPreset() {
 		g.wallBottom = true
 		g.wallLeft = true
 		g.wallRight = false
-		g.jet = true
 		// Circular obstacle
 		cx := g.fluid.NumX / 4
 		cy := g.fluid.NumY / 2
