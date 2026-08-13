@@ -9,8 +9,10 @@ var (
 )
 
 type Fluid struct {
-	density float32
-	h       float32
+	density  float32
+	h        float32
+	bfecc    *bfeccWorkspace
+	parallel *parallelExecutor
 
 	NumX, NumY int
 	numCells   int
@@ -22,6 +24,9 @@ type Fluid struct {
 	M    []float32 // smoke
 	newM []float32
 
+	// Multigrid solver parameters
+	MultigridLevels int // Number of multigrid levels
+
 	// Strength of the vorticity confinement force. Set to 0 to disable.
 	Confinement float32
 
@@ -30,13 +35,34 @@ type Fluid struct {
 	PressureDamping    float32 // Damping factor to reduce pressure oscillations
 	TurbulenceStrength float32 // Small-scale turbulence for realism
 	SmokeAdvection     float32 // Enhanced smoke transport coefficient
-	
-	// Multigrid solver parameters
-	UseMultigrid    bool // Enable multigrid acceleration
-	MultigridLevels int  // Number of multigrid levels
+
+	UseMultigrid bool // Enable multigrid acceleration
 
 	// BFECC advection
 	UseBFECC bool // Enable Back and Forth Error Compensating and Correcting advection
+}
+
+type bfeccWorkspace struct {
+	origU, origV []float32
+	fwdU, fwdV   []float32
+	bwdU, bwdV   []float32
+	corrU, corrV []float32
+}
+
+func (f *Fluid) bfeccWorkspace() *bfeccWorkspace {
+	if f.bfecc == nil {
+		f.bfecc = &bfeccWorkspace{
+			origU: make([]float32, f.numCells),
+			origV: make([]float32, f.numCells),
+			fwdU:  make([]float32, f.numCells),
+			fwdV:  make([]float32, f.numCells),
+			bwdU:  make([]float32, f.numCells),
+			bwdV:  make([]float32, f.numCells),
+			corrU: make([]float32, f.numCells),
+			corrV: make([]float32, f.numCells),
+		}
+	}
+	return f.bfecc
 }
 
 func New(density float32, width, height int, h float32) *Fluid {
@@ -61,9 +87,9 @@ func New(density float32, width, height int, h float32) *Fluid {
 		PressureDamping:    1.0,   // Slight damping to reduce oscillations
 		TurbulenceStrength: 0.02,  // Small turbulence for realism
 		SmokeAdvection:     1.0,   // Standard smoke advection
-		UseMultigrid:    false, // Multigrid disabled by default
-		MultigridLevels: 2,    // 2-level multigrid (fine + coarse)
-		UseBFECC:        false,
+		UseMultigrid:       false, // Multigrid disabled by default
+		MultigridLevels:    2,     // 2-level multigrid (fine + coarse)
+		UseBFECC:           false,
 	}
 }
 
@@ -77,6 +103,15 @@ func fill[T any](slice []T, val T) {
 }
 
 func (f *Fluid) Simulate(dt float32) {
+	// Reuse one worker set across the simulation's dependent phases without
+	// leaving permanent background goroutines attached to a Fluid.
+	executor := newParallelExecutor(max(f.NumX, f.NumY))
+	f.parallel = executor
+	defer func() {
+		executor.close()
+		f.parallel = nil
+	}()
+
 	// Enhanced solver with fewer iterations but better visual results
 	numIters := uint(8) // Reduced from 20, compensated by other improvements
 
@@ -108,6 +143,14 @@ func (f *Fluid) Simulate(dt float32) {
 	}
 }
 
+func (f *Fluid) parallelRange(start, end int, fn func(i int)) {
+	if f.parallel == nil {
+		parallelRange(start, end, fn)
+		return
+	}
+	f.parallel.parallelRange(start, end, fn)
+}
+
 // Artificial viscosity for visual smoothness - reduces iteration requirements
 func (f *Fluid) applyViscosity(dt float32) {
 	if f.ViscosityDiffusion <= 0 {
@@ -121,7 +164,7 @@ func (f *Fluid) applyViscosity(dt float32) {
 	copy(f.newU, f.U)
 	copy(f.newV, f.V)
 
-	parallelRange(1, f.NumX-1, func(i int) {
+	f.parallelRange(1, f.NumX-1, func(i int) {
 		for j := 1; j < f.NumY-1; j++ {
 			if f.S[i*n+j] > 0 {
 				// Laplacian diffusion for U
@@ -157,11 +200,11 @@ func (f *Fluid) makeIncompressible(numIters uint, dt float32) {
 func (f *Fluid) solveSingleGrid(numIters uint, dt float32) {
 	cp := f.density * f.h / dt
 	tolerance := float32(1e-5)
-	
+
 	// Adaptive relaxation - start aggressive, become more conservative
 	initialRelaxation := Relaxation
 	minRelaxation := float32(1.2)
-	
+
 	var prevMaxDiv float32 = 1e10
 
 	for iter := uint(0); iter < numIters; iter++ {
@@ -175,12 +218,12 @@ func (f *Fluid) solveSingleGrid(numIters uint, dt float32) {
 		if maxDiv < tolerance {
 			break
 		}
-		
+
 		// If divergence is not improving, reduce relaxation
 		if maxDiv >= prevMaxDiv*0.99 && iter > 2 {
 			currentRelaxation *= 0.8
 		}
-		
+
 		prevMaxDiv = maxDiv
 	}
 }
@@ -229,13 +272,13 @@ func (f *Fluid) pressureJacobiIteration(relaxation, cp float32) float32 {
 			f.V[i*n+j+1] += sy1 * p
 		}
 	}
-	
+
 	return maxDiv
 }
 
 func (f *Fluid) handleBorders() {
 	n := f.NumY
-	parallelRange(0, f.NumX, func(i int) {
+	f.parallelRange(0, f.NumX, func(i int) {
 		// Top border (j == 0) - Enhanced extrapolation
 		if f.S[i*n+0] == 0 || f.S[i*n+1] == 0 {
 			f.U[i*n+0] = 0
@@ -261,7 +304,7 @@ func (f *Fluid) handleBorders() {
 		}
 	})
 
-	parallelRange(0, f.NumY, func(j int) {
+	f.parallelRange(0, f.NumY, func(j int) {
 		// Left border (i == 0)
 		if f.S[0*n+j] == 0 || f.S[1*n+j] == 0 {
 			f.V[0*n+j] = 0
@@ -297,7 +340,7 @@ func (f *Fluid) advectVelocity(dt float32) {
 	h := f.h
 	h2 := h / 2
 
-	parallelRange(1, f.NumX, func(i int) {
+	f.parallelRange(1, f.NumX, func(i int) {
 		for j := 1; j < f.NumY; j++ {
 
 			// u component
@@ -405,7 +448,7 @@ func (f *Fluid) advectSmoke(dt float32) {
 	h := f.h
 	h2 := 0.5 * h
 
-	parallelRange(1, f.NumX-1, func(i int) {
+	f.parallelRange(1, f.NumX-1, func(i int) {
 		for j := 1; j < f.NumY-1; j++ {
 
 			if f.S[i*n+j] != 0.0 {
@@ -416,15 +459,15 @@ func (f *Fluid) advectSmoke(dt float32) {
 
 				// Enhanced sampling with better interpolation
 				smokeValue := f.sampleField(x, y, fieldM)
-				
+
 				// Add slight diffusion for more natural smoke spread
 				if f.ViscosityDiffusion > 0 {
 					smokeDiffusion := f.ViscosityDiffusion * 0.3 * dt // Reduced factor for smoke
-					neighbors := f.M[(i-1)*n+j] + f.M[(i+1)*n+j] + 
-					            f.M[i*n+j-1] + f.M[i*n+j+1] - 4*f.M[i*n+j]
+					neighbors := f.M[(i-1)*n+j] + f.M[(i+1)*n+j] +
+						f.M[i*n+j-1] + f.M[i*n+j+1] - 4*f.M[i*n+j]
 					smokeValue += smokeDiffusion * neighbors
 				}
-				
+
 				f.newM[i*n+j] = max(smokeValue, 0.0) // Keep smoke non-negative
 			}
 		}
@@ -435,11 +478,11 @@ func (f *Fluid) advectSmoke(dt float32) {
 
 func (f *Fluid) copyBorder(dst, src []float32) {
 	n := f.NumY
-	parallelRange(0, f.NumX, func(i int) {
+	f.parallelRange(0, f.NumX, func(i int) {
 		dst[i*n+0] = src[i*n+0]
 		dst[i*n+f.NumY-1] = src[i*n+f.NumY-1]
 	})
-	parallelRange(0, f.NumY, func(j int) {
+	f.parallelRange(0, f.NumY, func(j int) {
 		dst[0*n+j] = src[0*n+j]
 		dst[(f.NumX-1)*n+j] = src[(f.NumX-1)*n+j]
 	})
@@ -497,22 +540,22 @@ func (f *Fluid) addTurbulence(dt float32) {
 	if f.TurbulenceStrength <= 0 {
 		return
 	}
-	
+
 	n := f.NumY
 	turbStrength := f.TurbulenceStrength * dt
-	
+
 	// Simple noise-based turbulence
-	parallelRange(1, f.NumX-1, func(i int) {
+	f.parallelRange(1, f.NumX-1, func(i int) {
 		for j := 1; j < f.NumY-1; j++ {
 			if f.S[i*n+j] > 0 {
 				// Pseudo-random noise based on position and time-like factor
-				seedU := float32(i*137 + j*241) * 0.01
-				seedV := float32(i*157 + j*263) * 0.01
-				
+				seedU := float32(i*137+j*241) * 0.01
+				seedV := float32(i*157+j*263) * 0.01
+
 				// Simple sine-based noise
 				noiseU := float32(math.Sin(float64(seedU))) * turbStrength
 				noiseV := float32(math.Sin(float64(seedV))) * turbStrength
-				
+
 				// Only apply to regions with existing flow
 				localVel := float32(math.Sqrt(float64(f.U[i*n+j]*f.U[i*n+j] + f.V[i*n+j]*f.V[i*n+j])))
 				if localVel > 0.1 {
@@ -529,7 +572,7 @@ func (f *Fluid) addTurbulence(dt float32) {
 func (f *Fluid) GetAdaptiveTimeStep(basedt float32) float32 {
 	maxVel := float32(0.0)
 	n := f.NumY
-	
+
 	// Find maximum velocity for CFL condition
 	for i := 1; i < f.NumX-1; i++ {
 		for j := 1; j < f.NumY-1; j++ {
@@ -541,18 +584,18 @@ func (f *Fluid) GetAdaptiveTimeStep(basedt float32) float32 {
 			}
 		}
 	}
-	
+
 	if maxVel == 0 {
 		return basedt
 	}
-	
+
 	// CFL condition: dt < h / maxVel
 	cflFactor := float32(0.8) // Safety factor
 	adaptivedt := cflFactor * f.h / maxVel
-	
+
 	// Clamp to reasonable range
 	adaptivedt = max(min(adaptivedt, basedt*2.0), basedt*0.1)
-	
+
 	return adaptivedt
 }
 
@@ -560,36 +603,36 @@ func (f *Fluid) GetAdaptiveTimeStep(basedt float32) float32 {
 func (f *Fluid) solveMultigridVCycle(numIters uint, dt float32) {
 	cp := f.density * f.h / dt
 	tolerance := float32(1e-5)
-	
+
 	// Pre-smoothing iterations on fine grid
 	preSmoothIters := uint(3)
-	// Post-smoothing iterations on fine grid  
+	// Post-smoothing iterations on fine grid
 	postSmoothIters := uint(3)
-	
+
 	for iter := uint(0); iter < numIters; iter++ {
 		// Pre-smooth on fine grid
 		maxDiv := float32(0.0)
 		for smooth := uint(0); smooth < preSmoothIters; smooth++ {
 			maxDiv = f.pressureJacobiIteration(1.5, cp)
 		}
-		
+
 		if maxDiv < tolerance {
 			break
 		}
-		
+
 		// Compute residual and restrict to coarse grid
 		residual := f.computePressureResidual()
 		coarseRHS := f.restrictResidual(residual)
-		
+
 		// Solve on coarse grid (2x2 coarsening)
 		coarseCorrection := f.solveCoarseGrid(coarseRHS)
-		
+
 		// Prolongate correction back to fine grid
 		correction := f.prolongateCorrection(coarseCorrection)
-		
+
 		// Apply correction to fine grid pressure
 		f.applePressureCorrection(correction, cp)
-		
+
 		// Post-smooth on fine grid
 		for smooth := uint(0); smooth < postSmoothIters; smooth++ {
 			f.pressureJacobiIteration(1.2, cp)
@@ -601,32 +644,32 @@ func (f *Fluid) solveMultigridVCycle(numIters uint, dt float32) {
 func (f *Fluid) computePressureResidual() []float32 {
 	n := f.NumY
 	residual := make([]float32, f.numCells)
-	
+
 	for i := 1; i < f.NumX-1; i++ {
 		for j := 1; j < f.NumY-1; j++ {
 			if f.S[i*n+j] == 0 {
 				continue
 			}
-			
+
 			// Compute divergence (RHS of pressure equation)
 			div := f.U[(i+1)*n+j] - f.U[i*n+j] + f.V[i*n+j+1] - f.V[i*n+j]
-			
+
 			// Compute Laplacian of pressure (LHS)
 			sx0 := f.S[(i-1)*n+j]
 			sx1 := f.S[(i+1)*n+j]
 			sy0 := f.S[i*n+j-1]
 			sy1 := f.S[i*n+j+1]
-			
-			laplacian := sx0*(f.p[(i-1)*n+j] - f.p[i*n+j]) +
-			            sx1*(f.p[(i+1)*n+j] - f.p[i*n+j]) +
-			            sy0*(f.p[i*n+j-1] - f.p[i*n+j]) +
-			            sy1*(f.p[i*n+j+1] - f.p[i*n+j])
-			
+
+			laplacian := sx0*(f.p[(i-1)*n+j]-f.p[i*n+j]) +
+				sx1*(f.p[(i+1)*n+j]-f.p[i*n+j]) +
+				sy0*(f.p[i*n+j-1]-f.p[i*n+j]) +
+				sy1*(f.p[i*n+j+1]-f.p[i*n+j])
+
 			// Residual = RHS - LHS
 			residual[i*n+j] = -div - laplacian
 		}
 	}
-	
+
 	return residual
 }
 
@@ -636,30 +679,30 @@ func (f *Fluid) restrictResidual(fineResidual []float32) []float32 {
 	coarseNY := (f.NumY + 1) / 2
 	coarseSize := coarseNX * coarseNY
 	coarseRHS := make([]float32, coarseSize)
-	
+
 	// Full-weighting restriction - average neighboring points
 	for i := 1; i < coarseNX-1; i++ {
 		for j := 1; j < coarseNY-1; j++ {
 			fineI := i * 2
 			fineJ := j * 2
-			
+
 			if fineI < f.NumX-1 && fineJ < f.NumY-1 {
 				// Full weighting: center weight 0.25, neighbors 0.125, corners 0.0625
 				center := fineResidual[fineI*f.NumY+fineJ] * 0.25
-				neighbors := (fineResidual[(fineI-1)*f.NumY+fineJ] + 
-				             fineResidual[(fineI+1)*f.NumY+fineJ] + 
-				             fineResidual[fineI*f.NumY+fineJ-1] + 
-				             fineResidual[fineI*f.NumY+fineJ+1]) * 0.125
-				corners := (fineResidual[(fineI-1)*f.NumY+fineJ-1] + 
-				           fineResidual[(fineI+1)*f.NumY+fineJ-1] + 
-				           fineResidual[(fineI-1)*f.NumY+fineJ+1] + 
-				           fineResidual[(fineI+1)*f.NumY+fineJ+1]) * 0.0625
-				
+				neighbors := (fineResidual[(fineI-1)*f.NumY+fineJ] +
+					fineResidual[(fineI+1)*f.NumY+fineJ] +
+					fineResidual[fineI*f.NumY+fineJ-1] +
+					fineResidual[fineI*f.NumY+fineJ+1]) * 0.125
+				corners := (fineResidual[(fineI-1)*f.NumY+fineJ-1] +
+					fineResidual[(fineI+1)*f.NumY+fineJ-1] +
+					fineResidual[(fineI-1)*f.NumY+fineJ+1] +
+					fineResidual[(fineI+1)*f.NumY+fineJ+1]) * 0.0625
+
 				coarseRHS[i*coarseNY+j] = center + neighbors + corners
 			}
 		}
 	}
-	
+
 	return coarseRHS
 }
 
@@ -668,16 +711,16 @@ func (f *Fluid) solveCoarseGrid(rhs []float32) []float32 {
 	coarseNX := (f.NumX + 1) / 2
 	coarseNY := (f.NumY + 1) / 2
 	coarseSize := coarseNX * coarseNY
-	
+
 	coarseP := make([]float32, coarseSize)
 	coarseS := make([]float32, coarseSize)
-	
+
 	// Create coarse solid mask
 	for i := 0; i < coarseNX; i++ {
 		for j := 0; j < coarseNY; j++ {
 			fineI := i * 2
 			fineJ := j * 2
-			
+
 			if fineI < f.NumX && fineJ < f.NumY {
 				coarseS[i*coarseNY+j] = f.S[fineI*f.NumY+fineJ]
 			} else {
@@ -685,42 +728,42 @@ func (f *Fluid) solveCoarseGrid(rhs []float32) []float32 {
 			}
 		}
 	}
-	
+
 	// Solve coarse system with more iterations (since it's smaller)
 	coarseIters := 40
 	relaxation := float32(1.6)
-	
+
 	for iter := 0; iter < coarseIters; iter++ {
 		for i := 1; i < coarseNX-1; i++ {
 			for j := 1; j < coarseNY-1; j++ {
 				if coarseS[i*coarseNY+j] == 0 {
 					continue
 				}
-				
+
 				sx0 := coarseS[(i-1)*coarseNY+j]
 				sx1 := coarseS[(i+1)*coarseNY+j]
 				sy0 := coarseS[i*coarseNY+j-1]
 				sy1 := coarseS[i*coarseNY+j+1]
 				s := sx0 + sx1 + sy0 + sy1
-				
+
 				if s == 0 {
 					continue
 				}
-				
+
 				// Solve: Laplacian(p) = rhs
-				laplacian := sx0*(coarseP[(i-1)*coarseNY+j] - coarseP[i*coarseNY+j]) +
-				            sx1*(coarseP[(i+1)*coarseNY+j] - coarseP[i*coarseNY+j]) +
-				            sy0*(coarseP[i*coarseNY+j-1] - coarseP[i*coarseNY+j]) +
-				            sy1*(coarseP[i*coarseNY+j+1] - coarseP[i*coarseNY+j])
-				
+				laplacian := sx0*(coarseP[(i-1)*coarseNY+j]-coarseP[i*coarseNY+j]) +
+					sx1*(coarseP[(i+1)*coarseNY+j]-coarseP[i*coarseNY+j]) +
+					sy0*(coarseP[i*coarseNY+j-1]-coarseP[i*coarseNY+j]) +
+					sy1*(coarseP[i*coarseNY+j+1]-coarseP[i*coarseNY+j])
+
 				residual := rhs[i*coarseNY+j] - laplacian
 				correction := -residual / s * relaxation
-				
+
 				coarseP[i*coarseNY+j] += correction
 			}
 		}
 	}
-	
+
 	return coarseP
 }
 
@@ -728,7 +771,7 @@ func (f *Fluid) solveCoarseGrid(rhs []float32) []float32 {
 func (f *Fluid) prolongateCorrection(coarseCorrection []float32) []float32 {
 	correction := make([]float32, f.numCells)
 	coarseNY := (f.NumY + 1) / 2
-	
+
 	// Bilinear interpolation from coarse to fine
 	for i := 0; i < f.NumX; i++ {
 		for j := 0; j < f.NumY; j++ {
@@ -736,24 +779,24 @@ func (f *Fluid) prolongateCorrection(coarseCorrection []float32) []float32 {
 			coarseI := i / 2
 			coarseJ := j / 2
 			coarseNX := (f.NumX + 1) / 2
-			
+
 			if coarseI >= coarseNX-1 || coarseJ >= coarseNY-1 {
 				continue
 			}
-			
+
 			// Interpolation weights
 			fracI := float32(i%2) * 0.5
 			fracJ := float32(j%2) * 0.5
-			
+
 			// Bilinear interpolation
-			correction[i*f.NumY+j] = 
+			correction[i*f.NumY+j] =
 				(1-fracI)*(1-fracJ)*coarseCorrection[coarseI*coarseNY+coarseJ] +
-				fracI*(1-fracJ)*coarseCorrection[(coarseI+1)*coarseNY+coarseJ] +
-				(1-fracI)*fracJ*coarseCorrection[coarseI*coarseNY+coarseJ+1] +
-				fracI*fracJ*coarseCorrection[(coarseI+1)*coarseNY+coarseJ+1]
+					fracI*(1-fracJ)*coarseCorrection[(coarseI+1)*coarseNY+coarseJ] +
+					(1-fracI)*fracJ*coarseCorrection[coarseI*coarseNY+coarseJ+1] +
+					fracI*fracJ*coarseCorrection[(coarseI+1)*coarseNY+coarseJ+1]
 		}
 	}
-	
+
 	return correction
 }
 
@@ -912,10 +955,11 @@ func (f *Fluid) advectVelocityBFECC(dt float32) {
 	n := f.NumY
 	h := f.h
 	h2 := h / 2
+	workspace := f.bfeccWorkspace()
 
 	// Save original
-	origU := make([]float32, f.numCells)
-	origV := make([]float32, f.numCells)
+	origU := workspace.origU
+	origV := workspace.origV
 	copy(origU, f.U)
 	copy(origV, f.V)
 
@@ -923,8 +967,8 @@ func (f *Fluid) advectVelocityBFECC(dt float32) {
 	f.advectVelocity(dt)
 
 	// Save forward result
-	fwdU := make([]float32, f.numCells)
-	fwdV := make([]float32, f.numCells)
+	fwdU := workspace.fwdU
+	fwdV := workspace.fwdV
 	copy(fwdU, f.U)
 	copy(fwdV, f.V)
 
@@ -935,12 +979,12 @@ func (f *Fluid) advectVelocityBFECC(dt float32) {
 	copy(f.U, origU)
 	copy(f.V, origV)
 
-	bwdU := make([]float32, f.numCells)
-	bwdV := make([]float32, f.numCells)
+	bwdU := workspace.bwdU
+	bwdV := workspace.bwdV
 	f.copyBorder(bwdU, fwdU)
 	f.copyBorder(bwdV, fwdV)
 
-	parallelRange(1, f.NumX, func(i int) {
+	f.parallelRange(1, f.NumX, func(i int) {
 		for j := 1; j < f.NumY; j++ {
 			// u component backward advection
 			if f.S[i*n+j] != 0 && f.S[(i-1)*n+j] != 0 && j < f.NumY-1 {
@@ -966,8 +1010,8 @@ func (f *Fluid) advectVelocityBFECC(dt float32) {
 	})
 
 	// Pass 3: Compute error and corrected field
-	corrU := make([]float32, f.numCells)
-	corrV := make([]float32, f.numCells)
+	corrU := workspace.corrU
+	corrV := workspace.corrV
 	copy(corrU, origU)
 	copy(corrV, origV)
 
@@ -998,23 +1042,25 @@ func (f *Fluid) advectSmokeBFECC(dt float32) {
 	n := f.NumY
 	h := f.h
 	h2 := 0.5 * h
+	workspace := f.bfeccWorkspace()
 
-	// Save original
-	origM := make([]float32, f.numCells)
+	// Velocity advection has completed, so the smoke pass can reuse its first
+	// four scratch buffers.
+	origM := workspace.origU
 	copy(origM, f.M)
 
 	// Pass 1: Forward advect smoke
 	f.advectSmoke(dt)
 
 	// Save forward result
-	fwdM := make([]float32, f.numCells)
+	fwdM := workspace.origV
 	copy(fwdM, f.M)
 
 	// Pass 2: Backward advect the forward result
-	bwdM := make([]float32, f.numCells)
+	bwdM := workspace.fwdU
 	f.copyBorder(bwdM, fwdM)
 
-	parallelRange(1, f.NumX-1, func(i int) {
+	f.parallelRange(1, f.NumX-1, func(i int) {
 		for j := 1; j < f.NumY-1; j++ {
 			if f.S[i*n+j] != 0 {
 				u := (f.U[i*n+j] + f.U[(i+1)*n+j]) * 0.5 * f.SmokeAdvection
@@ -1027,7 +1073,7 @@ func (f *Fluid) advectSmokeBFECC(dt float32) {
 	})
 
 	// Pass 3: Error compensate
-	corrM := make([]float32, f.numCells)
+	corrM := workspace.fwdV
 	copy(corrM, origM)
 	for i := 1; i < f.NumX-1; i++ {
 		for j := 1; j < f.NumY-1; j++ {
@@ -1122,24 +1168,24 @@ func (f *Fluid) clampToNeighbors(val float32, src []float32, i, j int) float32 {
 // Apply pressure correction and update velocities
 func (f *Fluid) applePressureCorrection(correction []float32, cp float32) {
 	n := f.NumY
-	
+
 	for i := 1; i < f.NumX-1; i++ {
 		for j := 1; j < f.NumY-1; j++ {
 			if f.S[i*n+j] == 0 {
 				continue
 			}
-			
+
 			// Apply correction to pressure
 			f.p[i*n+j] += correction[i*n+j] * cp
-			
+
 			// Update velocities based on pressure gradient
 			sx0 := f.S[(i-1)*n+j]
 			sx1 := f.S[(i+1)*n+j]
 			sy0 := f.S[i*n+j-1]
 			sy1 := f.S[i*n+j+1]
-			
+
 			pressureCorrection := correction[i*n+j]
-			
+
 			f.U[i*n+j] -= sx0 * pressureCorrection
 			f.U[(i+1)*n+j] += sx1 * pressureCorrection
 			f.V[i*n+j] -= sy0 * pressureCorrection
