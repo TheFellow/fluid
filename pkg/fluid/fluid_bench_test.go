@@ -20,6 +20,7 @@ func newBenchFluid() *Fluid {
 func BenchmarkSimulate(b *testing.B) {
 	f := newBenchFluid()
 	dt := float32(1.0 / 120.0)
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		f.Simulate(dt)
@@ -32,6 +33,7 @@ func BenchmarkSimulateWithJet(b *testing.B) {
 	dt := float32(1.0 / 120.0)
 	n := f.NumY
 	jetVel := float32(4.0)
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := f.NumY/2 - 50; j < f.NumY/2+50; j++ {
@@ -46,9 +48,11 @@ func BenchmarkSimulateWithJet(b *testing.B) {
 func BenchmarkSimulateBFECC(b *testing.B) {
 	f := newBenchFluid()
 	f.UseBFECC = true
+	f.bfeccWorkspace()
 	dt := float32(1.0 / 120.0)
 	n := f.NumY
 	jetVel := float32(4.0)
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := f.NumY/2 - 50; j < f.NumY/2+50; j++ {
